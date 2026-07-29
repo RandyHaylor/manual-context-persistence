@@ -19,12 +19,14 @@ for the original design notes.
 ## Running it
 
 ```bash
-./run_context_handoff.py                      # create a new base session
-./run_context_handoff.py --resume-base <id>   # continue an existing one
+./run_context_handoff.py                      # asks: new base session, or resume?
+./run_context_handoff.py --new-base           # skip the question, create one
+./run_context_handoff.py --resume-base <id>   # skip the question, resume one
 ```
 
-It checks that the CLI answers and that both hooks are registered, resolves the
-base session, opens the shared tmux window with the first branch inside it, then
+It checks that the CLI answers and that both hooks are registered, asks whether
+to create or resume a base session (the flags skip the question so it can run
+unattended), opens the shared tmux window with the first branch inside it, then
 watches for completed turns and rotates. `Ctrl-C` stops the loop and leaves the
 window open, since the user may still be mid-conversation in it.
 
@@ -96,6 +98,13 @@ no hook may be the reason a session breaks.
 .claude/context-to-keep-history/context-to-keep-<stamp>.json  consumed handoffs
 .claude/user-prompt-log.json                                  verbatim prompts
 ```
+
+Prompts are logged byte for byte, with up to 2000 characters of the preceding
+agent output so a reply like "yes" is still meaningful later. A message typed
+while the agent is working never fires the prompt hook, so it is recovered from
+the transcript on the next submission — scoped to the gap since the previous
+prompt, so nothing is logged twice and a forked transcript's inherited history
+is never rescanned.
 
 ## Hooks
 

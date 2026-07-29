@@ -22,6 +22,8 @@ from typing import Any, Optional
 
 TRANSCRIPT_RECORD_TYPE_ASSISTANT = "assistant"
 TRANSCRIPT_RECORD_TYPE_USER = "user"
+TRANSCRIPT_RECORD_TYPE_ATTACHMENT = "attachment"
+ATTACHMENT_TYPE_QUEUED_COMMAND = "queued_command"
 
 
 def _iterate_transcript_records(transcript_path: str):
@@ -102,6 +104,83 @@ def _extract_tool_result_text(record: dict[str, Any]) -> Optional[str]:
             )
     joined_text = "\n".join(chunk for chunk in result_chunks if chunk)
     return joined_text or None
+
+
+def _is_human_queued_command_record(record: dict[str, Any]) -> bool:
+    """True for a message the user typed while the agent was still working.
+
+    Shape verified against a real transcript: an attachment record whose
+    attachment is a queued_command in prompt mode originating from a human.
+    """
+    if record.get("type") != TRANSCRIPT_RECORD_TYPE_ATTACHMENT:
+        return False
+    attachment = record.get("attachment") or {}
+    if not isinstance(attachment, dict):
+        return False
+    if attachment.get("type") != ATTACHMENT_TYPE_QUEUED_COMMAND:
+        return False
+    if attachment.get("commandMode") != "prompt":
+        return False
+    origin = attachment.get("origin") or {}
+    return isinstance(origin, dict) and origin.get("kind") == "human"
+
+
+def _extract_queued_command_text(record: dict[str, Any]) -> str:
+    attachment = record.get("attachment") or {}
+    if not isinstance(attachment, dict):
+        return ""
+    return attachment.get("prompt") or ""
+
+
+def find_user_messages_sent_while_agent_was_working(
+    transcript_path: str, incoming_prompt_text: str
+) -> list[str]:
+    """Return mid-turn user messages that no prompt-submit hook ever saw.
+
+    A message typed while the agent is working does not fire the hook, so it is
+    never logged — but it does land in the transcript, and the NEXT normal
+    submission does fire the hook. This runs then, and recovers the gap.
+
+    The scan is anchored to the span between the previous genuine prompt and
+    this one. Scanning wider would relog old messages on every submission, and
+    would rescan a forked transcript's inherited history as if it were new.
+
+    The incoming prompt is excluded: a queued message may be the very thing
+    being consumed as this submission, and the normal path already logs it.
+    """
+    all_records = list(_iterate_transcript_records(transcript_path))
+    incoming_prompt_text_stripped = (incoming_prompt_text or "").strip()
+
+    genuine_prompt_indices = [
+        index
+        for index, record in enumerate(all_records)
+        if _is_main_session_record(record) and _is_user_prompt_record(record)
+    ]
+
+    incoming_prompt_is_already_recorded = bool(genuine_prompt_indices) and (
+        str(all_records[genuine_prompt_indices[-1]]["message"]["content"]).strip()
+        == incoming_prompt_text_stripped
+    )
+    if incoming_prompt_is_already_recorded:
+        anchor_index = (
+            genuine_prompt_indices[-2] if len(genuine_prompt_indices) >= 2 else -1
+        )
+        window_end_index = genuine_prompt_indices[-1]
+    else:
+        anchor_index = genuine_prompt_indices[-1] if genuine_prompt_indices else -1
+        window_end_index = len(all_records)
+
+    recovered_message_texts: list[str] = []
+    for record in all_records[anchor_index + 1 : window_end_index]:
+        if not _is_human_queued_command_record(record):
+            continue
+        queued_message_text = _extract_queued_command_text(record)
+        if not queued_message_text.strip():
+            continue
+        if queued_message_text.strip() == incoming_prompt_text_stripped:
+            continue
+        recovered_message_texts.append(queued_message_text)
+    return recovered_message_texts
 
 
 def read_last_assistant_text_message(transcript_path: str) -> Optional[str]:

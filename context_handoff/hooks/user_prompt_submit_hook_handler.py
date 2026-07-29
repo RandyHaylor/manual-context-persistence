@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from context_handoff.adapters.claude_cli.claude_cli_transcript_reader import (
+    find_user_messages_sent_while_agent_was_working,
     read_agent_output_since_last_user_prompt,
 )
 from context_handoff.user_prompt_log.user_prompt_log_store import (
@@ -36,12 +37,28 @@ def handle_user_prompt_submit_payload(hook_payload: dict[str, Any]) -> dict[str,
 
         transcript_path = hook_payload.get("transcript_path")
         pre_submission_content = ""
+        user_prompt_log_store = UserPromptLogStore(project_directory)
+
         if transcript_path:
             pre_submission_content = read_agent_output_since_last_user_prompt(
                 transcript_path, MAXIMUM_PRE_SUBMISSION_CONTENT_CHARACTERS
             )
+            # Messages typed while the agent was working never fired this hook,
+            # so this submission is the first chance to record them. They are
+            # logged first, preserving the order the user sent them in.
+            for recovered_message_text in find_user_messages_sent_while_agent_was_working(
+                transcript_path, user_prompt_text
+            ):
+                user_prompt_log_store.append_user_prompt_entry(
+                    session_identifier=session_identifier,
+                    user_prompt_text=recovered_message_text,
+                    # No pre-submission context: a mid-turn message interrupts
+                    # the agent's work rather than answering a question, and the
+                    # surrounding output is already carried by the next entry.
+                    pre_submission_content="",
+                )
 
-        UserPromptLogStore(project_directory).append_user_prompt_entry(
+        user_prompt_log_store.append_user_prompt_entry(
             session_identifier=session_identifier,
             # Not stripped: the log's value is that it is byte-for-byte.
             user_prompt_text=user_prompt_text,

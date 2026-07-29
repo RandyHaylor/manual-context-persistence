@@ -213,6 +213,46 @@ def test_prompt_hook_captures_the_agent_output_that_preceded_the_prompt(
     assert "Shall I use adapter boundaries?" in logged_entry.pre_submission_content
 
 
+def test_prompt_hook_recovers_a_message_typed_while_the_agent_was_working(
+    tmp_path,
+) -> None:
+    """That message never fired this hook, so this submission is its only chance."""
+    project_directory = str(tmp_path / "project")
+    os.makedirs(project_directory)
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            user_prompt_record("do the work"),
+            {
+                "type": "attachment",
+                "attachment": {
+                    "type": "queued_command",
+                    "commandMode": "prompt",
+                    "origin": {"kind": "human"},
+                    "prompt": "actually also do this",
+                },
+            },
+        ],
+    )
+
+    handle_user_prompt_submit_payload(
+        {
+            "cwd": project_directory,
+            "session_id": "branch-session",
+            "prompt": "the next prompt",
+            "transcript_path": transcript_path,
+        }
+    )
+
+    logged_prompts = [
+        entry.user_prompt_text
+        for entry in UserPromptLogStore(project_directory).read_entries_for_session(
+            "branch-session"
+        )
+    ]
+    assert logged_prompts == ["actually also do this", "the next prompt"]
+
+
 def test_prompt_hook_ignores_an_empty_prompt(tmp_path) -> None:
     project_directory = str(tmp_path / "project")
     os.makedirs(project_directory)

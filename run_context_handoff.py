@@ -42,6 +42,9 @@ from context_handoff.orchestration.turn_loop_runner import (  # noqa: E402
 from context_handoff.orchestration.turn_rotation_orchestrator import (  # noqa: E402
     TurnRotationOrchestrator,
 )
+from context_handoff.startup.base_session_choice_prompt import (  # noqa: E402
+    ask_whether_to_create_or_resume_base_session,
+)
 from context_handoff.startup.base_session_resolver import (  # noqa: E402
     resolve_base_session_for_startup,
 )
@@ -67,7 +70,13 @@ def parse_command_line_arguments(argv: list[str]) -> argparse.Namespace:
         "--resume-base",
         dest="base_session_identifier_to_resume",
         default=None,
-        help="identifier of an existing base session to continue",
+        help="identifier of an existing base session to continue, skipping the prompt",
+    )
+    parser.add_argument(
+        "--new-base",
+        dest="create_new_base_session_without_asking",
+        action="store_true",
+        help="create a new base session without asking",
     )
     parser.add_argument(
         "--window-name",
@@ -110,10 +119,33 @@ def main(argv: list[str]) -> int:
         )
         return EXIT_CODE_PREFLIGHT_FAILED
 
+    # The flags exist so the app can run unattended; when neither is given, the
+    # spec's startup sequence asks.
+    base_session_identifier_to_resume = arguments.base_session_identifier_to_resume
+    if (
+        base_session_identifier_to_resume is None
+        and not arguments.create_new_base_session_without_asking
+    ):
+        try:
+            base_session_choice = ask_whether_to_create_or_resume_base_session(
+                read_answer=input,
+                write_line=print,
+                known_base_session_identifiers=(),
+            )
+        except EOFError:
+            print(
+                "no answer available on stdin; pass --new-base or --resume-base",
+                file=sys.stderr,
+            )
+            return EXIT_CODE_PREFLIGHT_FAILED
+        base_session_identifier_to_resume = (
+            base_session_choice.base_session_identifier_to_resume
+        )
+
     resolved_base_session = resolve_base_session_for_startup(
         harness=harness,
         working_directory=project_directory,
-        base_session_identifier_to_resume=arguments.base_session_identifier_to_resume,
+        base_session_identifier_to_resume=base_session_identifier_to_resume,
     )
     print(
         f"base session: {resolved_base_session.session_identifier} "
