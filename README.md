@@ -16,6 +16,21 @@ The full loop runs against a real Claude CLI and a real tmux window. See
 [1. claude-cli-context-handoff-poc.md](1.%20claude-cli-context-handoff-poc.md)
 for the original design notes.
 
+## Running it
+
+```bash
+./run_context_handoff.py                      # create a new base session
+./run_context_handoff.py --resume-base <id>   # continue an existing one
+```
+
+It checks that the CLI answers and that both hooks are registered, resolves the
+base session, opens the shared tmux window with the first branch inside it, then
+watches for completed turns and rotates. `Ctrl-C` stops the loop and leaves the
+window open, since the user may still be mid-conversation in it.
+
+Starting without the capture hooks looks fine and captures nothing, so the
+preflight refuses rather than warns. `--skip-hook-preflight` overrides it.
+
 ## Layout
 
 ```
@@ -26,8 +41,10 @@ context_handoff/
   context_to_keep/     handoff package, file store, history rotation
   user_prompt_log/     verbatim prompt log
   orchestration/       handoff message composer, turn rotation orchestrator
+  startup/             hook preflight, base session resolver
   hooks/               Stop and UserPromptSubmit handlers
 hooks/                 executable hook entry points
+run_context_handoff.py the app; the only place real adapters meet the core
 tests/                 unit, contract, integration, and opt-in live tests
 ```
 
