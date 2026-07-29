@@ -1,0 +1,5 @@
+{
+  "auto-resume": true,
+  "additional-stop-message": "Continue building the context-handoff POC slices in order: BaseSessionIngest, BranchSessionLaunch, SharedWindowSessionSwap, ContextToKeepCapture, UserPromptCapture, TurnRotationOrchestrator. Adapter boundaries and test-first always. Stay within the requirements in the source-of-truth tree; do not invent scope. Up to 10 live Claude CLI integration tests are authorized.",
+  "_comment": "Auto-resume opt-in for the context-handoff POC build. The agent flips this to false when the work is complete or a clarifying question is required."
+}
