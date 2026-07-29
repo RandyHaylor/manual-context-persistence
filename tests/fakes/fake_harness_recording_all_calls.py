@@ -11,7 +11,7 @@ import itertools
 from typing import Optional
 
 from context_handoff.interfaces.harness_interface import (
-    BranchSessionCreationResult,
+    SessionCreationResult,
     HarnessAvailabilityReport,
     HarnessInterface,
     SessionAcknowledgment,
@@ -35,6 +35,8 @@ class FakeHarnessRecordingAllCalls(HarnessInterface):
         self._acknowledgment_text = acknowledgment_text
         self._should_time_out_on_submission = should_time_out_on_submission
         self._branch_identifier_counter = itertools.count(1)
+        self._base_identifier_counter = itertools.count(1)
+        self.created_base_session_preambles: list[str] = []
 
         self.display_name_by_session_identifier: dict[str, str] = {}
         self.submitted_texts_by_session_identifier: dict[str, list[str]] = {}
@@ -64,12 +66,27 @@ class FakeHarnessRecordingAllCalls(HarnessInterface):
     ) -> Optional[str]:
         return self.display_name_by_session_identifier.get(session_identifier)
 
+    def create_base_session_with_preamble(
+        self, working_directory: str, preamble_text: str
+    ) -> SessionCreationResult:
+        base_session_identifier = (
+            f"fake-base-{next(self._base_identifier_counter)}"
+        )
+        self.created_base_session_preambles.append(preamble_text)
+        self.submitted_texts_by_session_identifier[base_session_identifier] = [
+            preamble_text
+        ]
+        return SessionCreationResult(
+            session_identifier=base_session_identifier,
+            transcript_path=f"/fake/transcripts/{base_session_identifier}",
+        )
+
     def create_branch_session_from_base_session(
         self,
         base_session_identifier: str,
         working_directory: str,
         branch_seed_prompt_text: str,
-    ) -> BranchSessionCreationResult:
+    ) -> SessionCreationResult:
         self.created_branch_parent_identifiers.append(base_session_identifier)
         branch_session_identifier = (
             f"fake-branch-{next(self._branch_identifier_counter)}-of-{base_session_identifier}"
@@ -79,8 +96,8 @@ class FakeHarnessRecordingAllCalls(HarnessInterface):
         self.submitted_texts_by_session_identifier[branch_session_identifier] = [
             branch_seed_prompt_text
         ]
-        return BranchSessionCreationResult(
-            branch_session_identifier=branch_session_identifier,
+        return SessionCreationResult(
+            session_identifier=branch_session_identifier,
             transcript_path=f"/fake/transcripts/{branch_session_identifier}",
         )
 

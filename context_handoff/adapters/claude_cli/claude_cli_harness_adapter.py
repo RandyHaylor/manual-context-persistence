@@ -18,7 +18,7 @@ import uuid
 from typing import Callable, Optional
 
 from context_handoff.interfaces.harness_interface import (
-    BranchSessionCreationResult,
+    SessionCreationResult,
     HarnessAvailabilityReport,
     HarnessInterface,
     SessionAcknowledgment,
@@ -42,11 +42,11 @@ DEFAULT_AVAILABILITY_PROBE_TIMEOUT_SECONDS = 30.0
 DEFAULT_BRANCH_SEED_TIMEOUT_SECONDS = 180.0
 
 
-class BranchSessionNotDurableError(RuntimeError):
-    """A branch was requested but its transcript never appeared on disk.
+class SessionNotDurableError(RuntimeError):
+    """A session was requested but its transcript never appeared on disk.
 
-    Raised rather than returning the identifier anyway: a branch that is not
-    durable fails later, in the next turn, where the cause is far harder to
+    Raised rather than returning the identifier anyway: a session that is not
+    durable fails later, in a subsequent turn, where the cause is far harder to
     see.
     """
 
@@ -161,12 +161,54 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
             session_identifier, working_directory, self._claude_projects_root_directory
         )
 
+    def create_base_session_with_preamble(
+        self, working_directory: str, preamble_text: str
+    ) -> SessionCreationResult:
+        base_session_identifier = self._generate_branch_session_identifier()
+        base_creation_argv = [
+            self._claude_executable_name,
+            "-p",
+            "--session-id",
+            base_session_identifier,
+            preamble_text,
+        ]
+        self._collect_stdout_lines_reporting_timeout(
+            base_creation_argv,
+            "",
+            DEFAULT_BRANCH_SEED_TIMEOUT_SECONDS,
+            working_directory=working_directory,
+        )
+        return self._require_durable_session_transcript(
+            base_session_identifier,
+            working_directory,
+            description_for_error="base session seeded with a preamble",
+        )
+
+    def _require_durable_session_transcript(
+        self,
+        session_identifier: str,
+        working_directory: str,
+        description_for_error: str,
+    ) -> SessionCreationResult:
+        """Return the session's location, or raise if it never materialized."""
+        transcript_path = build_transcript_file_path(
+            session_identifier, working_directory, self._claude_projects_root_directory
+        )
+        if not os.path.exists(transcript_path):
+            raise SessionNotDurableError(
+                f"{description_for_error} ({session_identifier}) produced no "
+                f"transcript at {transcript_path}"
+            )
+        return SessionCreationResult(
+            session_identifier=session_identifier, transcript_path=transcript_path
+        )
+
     def create_branch_session_from_base_session(
         self,
         base_session_identifier: str,
         working_directory: str,
         branch_seed_prompt_text: str,
-    ) -> BranchSessionCreationResult:
+    ) -> SessionCreationResult:
         branch_session_identifier = self._generate_branch_session_identifier()
         branch_creation_argv = [
             self._claude_executable_name,
@@ -191,20 +233,10 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
             working_directory=working_directory,
         )
 
-        branch_transcript_path = build_transcript_file_path(
+        return self._require_durable_session_transcript(
             branch_session_identifier,
             working_directory,
-            self._claude_projects_root_directory,
-        )
-        if not os.path.exists(branch_transcript_path):
-            raise BranchSessionNotDurableError(
-                f"branch {branch_session_identifier} was requested from "
-                f"{base_session_identifier} but no transcript appeared at "
-                f"{branch_transcript_path}"
-            )
-        return BranchSessionCreationResult(
-            branch_session_identifier=branch_session_identifier,
-            transcript_path=branch_transcript_path,
+            description_for_error=f"branch forked from {base_session_identifier}",
         )
 
     def submit_text_to_session_and_await_acknowledgment(

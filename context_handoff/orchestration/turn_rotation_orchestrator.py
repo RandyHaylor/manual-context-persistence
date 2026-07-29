@@ -104,16 +104,16 @@ class TurnRotationOrchestrator:
         )
         branch_ordinal = next(self._branch_ordinal_counter)
         branch_command_line_argv = self._harness.build_interactive_resume_command_line(
-            session_identifier=branch_creation_result.branch_session_identifier,
+            session_identifier=branch_creation_result.session_identifier,
             display_name=f"context handoff branch {branch_ordinal}",
         )
         self._user_interface_control.run_command_line_in_shared_window(
             self._shared_window_identifier, branch_command_line_argv
         )
         self._current_branch_session_identifier = (
-            branch_creation_result.branch_session_identifier
+            branch_creation_result.session_identifier
         )
-        return branch_creation_result.branch_session_identifier
+        return branch_creation_result.session_identifier
 
     def start_first_branch_session(self) -> str:
         """Open the shared window and run the first branch inside it."""

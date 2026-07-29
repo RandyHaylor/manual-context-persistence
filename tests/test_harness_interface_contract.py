@@ -12,7 +12,7 @@ import inspect
 import pytest
 
 from context_handoff.interfaces.harness_interface import (
-    BranchSessionCreationResult,
+    SessionCreationResult,
     HarnessAvailabilityReport,
     HarnessInterface,
     SessionAcknowledgment,
@@ -51,9 +51,9 @@ class HarnessInterfaceContractTestSuite:
             working_directory=WORKING_DIRECTORY_UNDER_TEST,
             branch_seed_prompt_text="seed",
         )
-        assert isinstance(result, BranchSessionCreationResult)
-        assert result.branch_session_identifier
-        assert result.branch_session_identifier != BASE_SESSION_IDENTIFIER_UNDER_TEST
+        assert isinstance(result, SessionCreationResult)
+        assert result.session_identifier
+        assert result.session_identifier != BASE_SESSION_IDENTIFIER_UNDER_TEST
         assert result.transcript_path
 
     def test_two_branches_of_one_base_get_different_identifiers(self) -> None:
@@ -65,9 +65,29 @@ class HarnessInterfaceContractTestSuite:
             BASE_SESSION_IDENTIFIER_UNDER_TEST, WORKING_DIRECTORY_UNDER_TEST, "seed"
         )
         assert (
-            first_branch.branch_session_identifier
-            != second_branch.branch_session_identifier
+            first_branch.session_identifier
+            != second_branch.session_identifier
         )
+
+    def test_base_session_creation_returns_a_durable_session(self) -> None:
+        harness = self.build_harness_under_test()
+        result = harness.create_base_session_with_preamble(
+            working_directory=WORKING_DIRECTORY_UNDER_TEST,
+            preamble_text="You are a base session that only accumulates context.",
+        )
+        assert isinstance(result, SessionCreationResult)
+        assert result.session_identifier
+        assert result.transcript_path
+
+    def test_two_base_sessions_get_different_identifiers(self) -> None:
+        harness = self.build_harness_under_test()
+        first_base = harness.create_base_session_with_preamble(
+            WORKING_DIRECTORY_UNDER_TEST, "preamble"
+        )
+        second_base = harness.create_base_session_with_preamble(
+            WORKING_DIRECTORY_UNDER_TEST, "preamble"
+        )
+        assert first_base.session_identifier != second_base.session_identifier
 
     def test_submission_returns_an_acknowledgment(self) -> None:
         harness = self.build_harness_under_test()
@@ -121,7 +141,7 @@ def test_fake_harness_leaves_the_base_session_untouched_when_branching() -> None
     )
     assert BASE_SESSION_IDENTIFIER_UNDER_TEST not in harness.submitted_texts_by_session_identifier
     assert harness.submitted_texts_by_session_identifier[
-        branch.branch_session_identifier
+        branch.session_identifier
     ] == ["seed text"]
 
 

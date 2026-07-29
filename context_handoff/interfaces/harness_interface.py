@@ -36,15 +36,19 @@ class HarnessAvailabilityReport:
 
 
 @dataclass(frozen=True)
-class BranchSessionCreationResult:
-    """A branch session that is guaranteed durable on disk when returned.
+class SessionCreationResult:
+    """A session that is guaranteed durable on disk when returned.
+
+    Returned by every operation that brings a session into existence — a base
+    session created from a preamble, or a branch forked from a base — because
+    callers need the same two things from all of them.
 
     ``transcript_path`` is an opaque location owned by the harness; the core
     treats it as a token to hand back to the harness, never as something to
     parse.
     """
 
-    branch_session_identifier: str
+    session_identifier: str
     transcript_path: str
 
 
@@ -89,12 +93,23 @@ class HarnessInterface(ABC):
         """Return the human-facing name shown for a session, or None if unset."""
 
     @abstractmethod
+    def create_base_session_with_preamble(
+        self, working_directory: str, preamble_text: str
+    ) -> SessionCreationResult:
+        """Create a brand-new session seeded with the base-session preamble.
+
+        Used once at startup when the user is not resuming an existing base.
+        The returned session must be fully durable on disk before this method
+        returns, so a branch can immediately be forked from it.
+        """
+
+    @abstractmethod
     def create_branch_session_from_base_session(
         self,
         base_session_identifier: str,
         working_directory: str,
         branch_seed_prompt_text: str,
-    ) -> BranchSessionCreationResult:
+    ) -> SessionCreationResult:
         """Fork a new branch session that inherits the base session's context.
 
         The base session must be left unmodified. The returned branch must be

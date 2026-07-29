@@ -14,7 +14,7 @@ import os
 import pytest
 
 from context_handoff.adapters.claude_cli.claude_cli_harness_adapter import (
-    BranchSessionNotDurableError,
+    SessionNotDurableError,
     ClaudeCliHarnessAdapter,
 )
 from context_handoff.adapters.claude_cli.claude_cli_transcript_locator import (
@@ -190,8 +190,8 @@ def test_branch_creation_argv_forks_the_base_into_a_new_session(tmp_path) -> Non
     # would be appended to the base session instead.
     assert "--fork-session" in recorded_argv
     assert "--session-id" in recorded_argv
-    assert branch.branch_session_identifier in recorded_argv
-    assert branch.branch_session_identifier != "base-session"
+    assert branch.session_identifier in recorded_argv
+    assert branch.session_identifier != "base-session"
 
 
 def test_branch_creation_seeds_the_fork_so_its_transcript_materializes(tmp_path) -> None:
@@ -225,7 +225,7 @@ def test_branch_creation_fails_loudly_when_the_transcript_never_appears(tmp_path
         claude_projects_root_directory=str(tmp_path),
     )
 
-    with pytest.raises(BranchSessionNotDurableError):
+    with pytest.raises(SessionNotDurableError):
         adapter.create_branch_session_from_base_session(
             "base-session", WORKING_DIRECTORY_UNDER_TEST, "[branch seed]"
         )

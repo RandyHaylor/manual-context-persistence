@@ -105,6 +105,29 @@ def test_live_availability_probe_finds_the_installed_cli(live_adapter) -> None:
     assert report.detail_text
 
 
+def test_live_base_session_created_from_the_preamble_is_durable_and_forkable(
+    live_adapter, live_working_directory
+) -> None:
+    """Startup's create-a-new-base path, end to end against the real CLI."""
+    from context_handoff.startup.base_session_resolver import (
+        resolve_base_session_for_startup,
+    )
+
+    resolved_base = resolve_base_session_for_startup(
+        harness=live_adapter,
+        working_directory=live_working_directory,
+        base_session_identifier_to_resume=None,
+    )
+    assert resolved_base.was_newly_created is True
+
+    branch = live_adapter.create_branch_session_from_base_session(
+        resolved_base.session_identifier,
+        live_working_directory,
+        "[context-handoff branch seed] (process seed, ignore this)",
+    )
+    assert os.path.exists(branch.transcript_path)
+
+
 def test_live_base_session_transcript_exists_after_creation(
     live_base_session_identifier, live_working_directory
 ) -> None:
@@ -169,7 +192,7 @@ def test_live_branch_creation_produces_a_durable_transcript(
             "[context-handoff branch seed] (process seed, ignore this)"
         ),
     )
-    assert branch.branch_session_identifier != live_base_session_identifier
+    assert branch.session_identifier != live_base_session_identifier
     assert os.path.exists(branch.transcript_path)
 
 
@@ -184,7 +207,7 @@ def test_live_branch_inherits_the_base_session_context(
     )
 
     answer = live_adapter.submit_text_to_session_and_await_acknowledgment(
-        session_identifier=branch.branch_session_identifier,
+        session_identifier=branch.session_identifier,
         submitted_text=(
             "What is the project codeword you were told to remember? "
             "Reply with only the codeword."
@@ -225,7 +248,7 @@ def test_live_two_branches_of_one_base_are_independent(
         "[context-handoff branch seed] (process seed, ignore this)",
     )
     live_adapter.submit_text_to_session_and_await_acknowledgment(
-        first_branch.branch_session_identifier,
+        first_branch.session_identifier,
         "Remember a second codeword: NARWHAL-3311. Reply with only the word acknowledged.",
         LIVE_SESSION_TIMEOUT_SECONDS,
     )
@@ -236,7 +259,7 @@ def test_live_two_branches_of_one_base_are_independent(
         "[context-handoff branch seed] (process seed, ignore this)",
     )
     answer = live_adapter.submit_text_to_session_and_await_acknowledgment(
-        second_branch.branch_session_identifier,
+        second_branch.session_identifier,
         "Do you know a codeword containing the word NARWHAL? Answer only yes or no.",
         LIVE_SESSION_TIMEOUT_SECONDS,
     )
