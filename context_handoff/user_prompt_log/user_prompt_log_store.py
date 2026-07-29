@@ -153,6 +153,16 @@ class UserPromptLogStore:
             if not entry.has_been_consumed
         ]
 
+    def read_all_unconsumed_entries(self) -> list[UserPromptLogEntry]:
+        """Return unconsumed entries across every session, in submission order.
+
+        Rotation uses this rather than the per-session view: a prompt typed
+        while a swap was under way belongs to the session the user was looking
+        at a moment ago, and scoping strictly to the current branch would strand
+        it in the log forever.
+        """
+        return [entry for entry in self._read_all_entries() if not entry.has_been_consumed]
+
     def mark_entries_consumed(self, entry_identifiers: Iterable[int]) -> None:
         entry_identifiers_to_consume = set(entry_identifiers)
         if not entry_identifiers_to_consume:
