@@ -14,10 +14,17 @@ from context_handoff.adapters.claude_cli.non_interactive_process_launcher import
 
 
 class RecordedProcessLaunch:
-    def __init__(self, command_argv: list[str], stdin_text: str, timeout_seconds: float):
+    def __init__(
+        self,
+        command_argv: list[str],
+        stdin_text: str,
+        timeout_seconds: float,
+        working_directory: Optional[str] = None,
+    ):
         self.command_argv = list(command_argv)
         self.stdin_text = stdin_text
         self.timeout_seconds = timeout_seconds
+        self.working_directory = working_directory
 
     def __repr__(self) -> str:
         return f"RecordedProcessLaunch(argv={self.command_argv!r})"
@@ -48,8 +55,11 @@ class FakeNonInteractiveProcessLauncher(NonInteractiveProcessLauncherInterface):
         command_argv: list[str],
         stdin_text: str,
         timeout_seconds: float,
+        working_directory: Optional[str] = None,
     ) -> Iterator[str]:
-        recorded_launch = RecordedProcessLaunch(command_argv, stdin_text, timeout_seconds)
+        recorded_launch = RecordedProcessLaunch(
+            command_argv, stdin_text, timeout_seconds, working_directory
+        )
         launch_index = len(self.recorded_launches)
         self.recorded_launches.append(recorded_launch)
 

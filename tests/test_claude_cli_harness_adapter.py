@@ -231,6 +231,47 @@ def test_branch_creation_fails_loudly_when_the_transcript_never_appears(tmp_path
         )
 
 
+def test_branch_creation_runs_in_the_requested_working_directory(tmp_path) -> None:
+    """The CLI keys a transcript to the launch directory, not the caller's cwd."""
+    projects_root_directory = str(tmp_path)
+    process_launcher = FakeNonInteractiveProcessLauncher(
+        stdout_lines_to_yield=[build_result_event_line("seeded")],
+        on_launch_side_effect=make_transcript_appear_on_launch(projects_root_directory),
+    )
+    adapter = ClaudeCliHarnessAdapter(
+        process_launcher=process_launcher,
+        claude_projects_root_directory=projects_root_directory,
+    )
+
+    adapter.create_branch_session_from_base_session(
+        "base-session", WORKING_DIRECTORY_UNDER_TEST, "[branch seed]"
+    )
+
+    assert (
+        process_launcher.recorded_launches[0].working_directory
+        == WORKING_DIRECTORY_UNDER_TEST
+    )
+
+
+def test_submission_runs_in_the_projects_working_directory(tmp_path) -> None:
+    """Resuming has no directory argument, so the adapter supplies its own."""
+    process_launcher = FakeNonInteractiveProcessLauncher(
+        stdout_lines_to_yield=[build_result_event_line("ok")]
+    )
+    adapter = ClaudeCliHarnessAdapter(
+        process_launcher=process_launcher,
+        claude_projects_root_directory=str(tmp_path),
+        project_working_directory=WORKING_DIRECTORY_UNDER_TEST,
+    )
+
+    adapter.submit_text_to_session_and_await_acknowledgment("base-session", "text", 30.0)
+
+    assert (
+        process_launcher.recorded_launches[0].working_directory
+        == WORKING_DIRECTORY_UNDER_TEST
+    )
+
+
 def test_availability_probe_reports_available_when_the_cli_answers(tmp_path) -> None:
     process_launcher = FakeNonInteractiveProcessLauncher(
         stdout_lines_to_yield=["1.2.3 (Claude Code)"]
@@ -251,7 +292,9 @@ def test_availability_probe_reports_available_when_the_cli_answers(tmp_path) -> 
 
 def test_availability_probe_reports_unavailable_when_the_cli_is_missing(tmp_path) -> None:
     class MissingExecutableProcessLauncher(FakeNonInteractiveProcessLauncher):
-        def stream_stdout_lines_until_exit(self, command_argv, stdin_text, timeout_seconds):
+        def stream_stdout_lines_until_exit(
+            self, command_argv, stdin_text, timeout_seconds, working_directory=None
+        ):
             raise FileNotFoundError("claude")
             yield  # pragma: no cover - makes this a generator function
 

@@ -59,7 +59,15 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
         claude_executable_name: str = DEFAULT_CLAUDE_EXECUTABLE_NAME,
         observe_stream_event: Optional[Callable[[str, str], None]] = None,
         generate_branch_session_identifier: Optional[Callable[[], str]] = None,
+        project_working_directory: Optional[str] = None,
     ) -> None:
+        """``project_working_directory`` is where resume-style invocations run.
+
+        Branch creation takes its directory from the call, but resuming a
+        session has no directory argument in the interface, and the CLI resolves
+        a session against the directory it is launched from — so the adapter
+        must be told once, at construction, which project it belongs to.
+        """
         self._process_launcher = process_launcher or SubprocessNonInteractiveProcessLauncher(
             observe_stream_event=observe_stream_event
         )
@@ -69,9 +77,14 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
         self._generate_branch_session_identifier = (
             generate_branch_session_identifier or (lambda: str(uuid.uuid4()))
         )
+        self._project_working_directory = project_working_directory
 
     def _collect_stdout_lines_reporting_timeout(
-        self, command_argv: list[str], stdin_text: str, timeout_seconds: float
+        self,
+        command_argv: list[str],
+        stdin_text: str,
+        timeout_seconds: float,
+        working_directory: Optional[str] = None,
     ) -> tuple[list[str], bool]:
         """Buffer stdout lines, returning whatever arrived plus a timeout flag.
 
@@ -85,6 +98,7 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
                 command_argv=command_argv,
                 stdin_text=stdin_text,
                 timeout_seconds=timeout_seconds,
+                working_directory=working_directory,
             ):
                 collected_stdout_lines.append(stdout_line)
         except NonInteractiveProcessTimedOutError:
@@ -167,8 +181,14 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
             "-p",
             branch_seed_prompt_text,
         ]
+        # The child must run in the project directory: the CLI keys a
+        # session's transcript to where it was launched, so a fork created
+        # elsewhere would be invisible to the durability check below.
         self._collect_stdout_lines_reporting_timeout(
-            branch_creation_argv, "", DEFAULT_BRANCH_SEED_TIMEOUT_SECONDS
+            branch_creation_argv,
+            "",
+            DEFAULT_BRANCH_SEED_TIMEOUT_SECONDS,
+            working_directory=working_directory,
         )
 
         branch_transcript_path = build_transcript_file_path(
@@ -200,7 +220,10 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
         # The text goes on stdin: handoff payloads are large and may contain
         # anything, and argv is neither the right size nor the right shape.
         collected_stdout_lines, timed_out = self._collect_stdout_lines_reporting_timeout(
-            submission_argv, submitted_text, acknowledgment_timeout_seconds
+            submission_argv,
+            submitted_text,
+            acknowledgment_timeout_seconds,
+            working_directory=self._project_working_directory,
         )
         parse_result = parse_stream_json_event_lines(
             collected_stdout_lines, observe_stream_event=self._observe_stream_event

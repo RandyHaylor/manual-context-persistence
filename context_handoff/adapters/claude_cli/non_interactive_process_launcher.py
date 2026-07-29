@@ -37,8 +37,14 @@ class NonInteractiveProcessLauncherInterface(ABC):
         command_argv: list[str],
         stdin_text: str,
         timeout_seconds: float,
+        working_directory: Optional[str] = None,
     ) -> Iterator[str]:
         """Run a process and yield its stdout lines as they arrive.
+
+        ``working_directory`` is where the process runs. It matters because the
+        harness keys a session's transcript to the directory it was launched
+        from, so a caller that asks about one directory while the child runs in
+        another will not find the transcript it just created.
 
         Raises ``NonInteractiveProcessTimedOutError`` if the process has not
         exited by the deadline.
@@ -80,11 +86,12 @@ class SubprocessNonInteractiveProcessLauncher(NonInteractiveProcessLauncherInter
         command_argv: list[str],
         stdin_text: str,
         timeout_seconds: float,
+        working_directory: Optional[str] = None,
     ) -> Iterator[str]:
         self._emit_observed_event(
             STREAM_EVENT_KIND_SUBPROCESS_LAUNCH,
             f"argv={command_argv} stdin_chars={len(stdin_text)} "
-            f"timeout_seconds={timeout_seconds}",
+            f"timeout_seconds={timeout_seconds} working_directory={working_directory}",
         )
         process_handle = subprocess.Popen(
             command_argv,
@@ -95,6 +102,7 @@ class SubprocessNonInteractiveProcessLauncher(NonInteractiveProcessLauncherInter
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            cwd=working_directory,
         )
 
         try:
