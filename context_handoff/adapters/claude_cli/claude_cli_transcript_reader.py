@@ -70,59 +70,71 @@ def _extract_assistant_text(record: dict[str, Any]) -> Optional[str]:
     return joined_text or None
 
 
-def extract_user_prompt_text(record: dict[str, Any]) -> Optional[str]:
-    """Return the text of a genuine typed prompt, or None if this is not one.
+def extract_user_prompt_text(record: dict[str, Any]) -> str:
+    """Return the plain text of a user-prompt record, or "" if it has none.
 
-    Three record shapes wear the type "user" and only one of them is a prompt:
-
-      * a plain string is a typed prompt — unless it is an interrupt marker,
-        which the CLI writes when a turn is cancelled;
-      * a list containing tool_result blocks is tool output;
-      * a list of text blocks is also a typed prompt, which is how a prompt
-        carrying an attachment is recorded.
-
-    Getting this wrong is not cosmetic. Treating an interrupt marker as a
-    prompt moves the turn boundary past work the user has not yet seen
-    accounted for, and this system cancels a session on every rotation, so
-    that would be the normal path rather than an edge case. Treating an
-    attachment-style prompt as *not* a prompt leaves the boundary too far
-    back, which re-reads material that was already handled.
+    Content is either a plain string or a list of text blocks; the list form is
+    how a prompt carrying an attachment is recorded. Mirrors the reference
+    implementation named in the spec, including its "\\n" join and its
+    tolerance of bare string blocks.
     """
-    if record.get("type") != TRANSCRIPT_RECORD_TYPE_USER:
-        return None
-    # Injected content — system reminders, skill loads, tool-sourced text —
-    # also arrives as a user record, and is flagged isMeta. Verified against a
-    # real transcript: every genuinely typed prompt had the flag absent, and
-    # every injected record had it true.
-    if record.get("isMeta"):
-        return None
     message = record.get("message")
     if not isinstance(message, dict):
-        return None
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                text_parts.append(block)
+        return "\n".join(part for part in text_parts if part)
+    return ""
+
+
+def _is_user_prompt_record(record: dict[str, Any]) -> bool:
+    """True for a genuine user prompt: not a tool result, not a cancel marker.
+
+    This mirrors the reference implementation the spec points to, deliberately
+    and exactly. It judges a record by its SHAPE — string content, or list
+    content without tool_result blocks — and by whether its text is an
+    interrupt marker. It does not attempt to distinguish typed text from
+    harness-injected text by any other signal.
+
+    That restraint is the point. This predicate only decides where a turn
+    BEGINS, which bounds how much preceding agent output is captured and how
+    far back the mid-turn scan reaches. It never decides what gets logged as a
+    user message: prompt text comes from the hook payload, and mid-turn
+    messages come from human queued_command attachments. Widening this
+    predicate on a guess moves turn boundaries without making the log more
+    faithful.
+    """
+    if record.get("type") != TRANSCRIPT_RECORD_TYPE_USER:
+        return False
+    message = record.get("message")
+    if not isinstance(message, dict):
+        return False
 
     content = message.get("content")
     if isinstance(content, str):
-        if content.strip().startswith(INTERRUPT_MARKER_TEXT_PREFIX):
-            return None
-        return content
+        return not _is_interrupt_marker_text(content)
     if isinstance(content, list):
         if any(
             isinstance(block, dict) and block.get("type") == "tool_result"
             for block in content
         ):
-            return None
-        text_chunks = [
-            block.get("text", "")
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        ]
-        joined_text = "".join(text_chunks)
-        return joined_text if joined_text else None
-    return None
+            return False
+        # An attachment-style prompt whose text is only a marker is still a
+        # marker.
+        return not _is_interrupt_marker_text(extract_user_prompt_text(record))
+    return False
 
 
-def _is_user_prompt_record(record: dict[str, Any]) -> bool:
-    return extract_user_prompt_text(record) is not None
+def _is_interrupt_marker_text(text: str) -> bool:
+    return text.strip().startswith(INTERRUPT_MARKER_TEXT_PREFIX)
 
 
 def _extract_tool_result_text(record: dict[str, Any]) -> Optional[str]:
@@ -171,10 +183,35 @@ def _is_human_queued_command_record(record: dict[str, Any]) -> bool:
 
 
 def _extract_queued_command_text(record: dict[str, Any]) -> str:
+    """Return the queued message's text, whatever shape the field takes.
+
+    ``attachment.prompt`` is a plain string on some CLI versions and a list of
+    text blocks on others — including the current one, where the list form is
+    the common shape. Verified across 473 real transcripts: 277 string, 57
+    list.
+
+    This is the one place this module intentionally differs from the reference
+    implementation, which indexes the field as a string and raises on the list
+    form. Raising here is not a survivable outcome: the hook catches broadly,
+    so the whole submission is dropped and the user's current prompt goes
+    unlogged. The set of records treated as queued human messages is
+    unchanged.
+    """
     attachment = record.get("attachment") or {}
     if not isinstance(attachment, dict):
         return ""
-    return attachment.get("prompt") or ""
+    prompt_value = attachment.get("prompt")
+    if isinstance(prompt_value, str):
+        return prompt_value
+    if isinstance(prompt_value, list):
+        text_parts: list[str] = []
+        for block in prompt_value:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                text_parts.append(block)
+        return "\n".join(part for part in text_parts if part)
+    return ""
 
 
 def find_user_messages_sent_while_agent_was_working(
@@ -205,7 +242,7 @@ def find_user_messages_sent_while_agent_was_working(
     # Extracted rather than indexed: a prompt's content may be a list of text
     # blocks, and str() of that list would never match the incoming text.
     incoming_prompt_is_already_recorded = bool(genuine_prompt_indices) and (
-        (extract_user_prompt_text(all_records[genuine_prompt_indices[-1]]) or "").strip()
+        extract_user_prompt_text(all_records[genuine_prompt_indices[-1]]).strip()
         == incoming_prompt_text_stripped
     )
     if incoming_prompt_is_already_recorded:

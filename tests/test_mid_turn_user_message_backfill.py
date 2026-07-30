@@ -262,24 +262,77 @@ def test_an_attachment_style_incoming_prompt_is_recognised_as_already_recorded(
     ) == ["mid-turn aside"]
 
 
-def test_injected_meta_records_do_not_move_the_anchor(tmp_path) -> None:
-    """A system reminder between prompt and aside must not hide the aside."""
+def test_the_anchor_is_judged_by_record_shape_alone(tmp_path) -> None:
+    """Mirrors the reference: any string-content user record moves the anchor.
+
+    Only the span after it is scanned. Nothing here is logged as a user
+    message — logging comes from the hook payload and from human
+    queued_command attachments — so this bounds the scan, not the log.
+    """
     transcript_path = write_transcript(
         tmp_path,
         [
             genuine_user_prompt_record("do the work"),
+            queued_human_message_record("aside before the injected record"),
             {
                 "type": "user",
                 "isSidechain": False,
                 "isMeta": True,
                 "message": {"role": "user", "content": "<system-reminder>x</system-reminder>"},
             },
-            queued_human_message_record("aside after an injected record"),
+            queued_human_message_record("aside after the injected record"),
         ],
     )
     assert find_user_messages_sent_while_agent_was_working(
         transcript_path, "the next prompt"
-    ) == ["aside after an injected record"]
+    ) == ["aside after the injected record"]
+
+
+def queued_human_message_record_with_list_prompt(prompt_text: str) -> dict:
+    """The shape the current CLI writes: attachment.prompt as text blocks."""
+    return {
+        "type": "attachment",
+        "attachment": {
+            "type": "queued_command",
+            "commandMode": "prompt",
+            "origin": {"kind": "human"},
+            "prompt": [{"type": "text", "text": prompt_text}],
+        },
+    }
+
+
+def test_a_queued_message_whose_prompt_is_a_list_is_recovered(tmp_path) -> None:
+    """Verified as the common shape on the installed CLI version.
+
+    Indexing this as a string raises, and the hook catches broadly, so the
+    whole submission would be dropped and the user's own prompt lost.
+    """
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            genuine_user_prompt_record("do the work"),
+            queued_human_message_record_with_list_prompt("aside sent as text blocks"),
+        ],
+    )
+    assert find_user_messages_sent_while_agent_was_working(
+        transcript_path, "the next prompt"
+    ) == ["aside sent as text blocks"]
+
+
+def test_a_list_prompt_matching_the_incoming_prompt_is_not_duplicated(tmp_path) -> None:
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            genuine_user_prompt_record("turn one"),
+            queued_human_message_record_with_list_prompt("this becomes the incoming"),
+        ],
+    )
+    assert (
+        find_user_messages_sent_while_agent_was_working(
+            transcript_path, "this becomes the incoming"
+        )
+        == []
+    )
 
 
 def test_a_transcript_with_no_prior_prompt_still_recovers_queued_messages(

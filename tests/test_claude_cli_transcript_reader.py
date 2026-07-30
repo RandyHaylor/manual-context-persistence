@@ -258,34 +258,88 @@ def test_an_attachment_style_prompt_starts_a_new_turn_window(tmp_path) -> None:
     assert "OLD TURN OUTPUT" not in recent_output
 
 
-def injected_meta_user_record(text: str, as_list_content: bool = False) -> dict:
-    """Injected content — a system reminder or skill load — not typed by anyone."""
-    return {
-        "type": "user",
-        "isSidechain": False,
-        "isMeta": True,
-        "message": {
-            "role": "user",
-            "content": [{"type": "text", "text": text}] if as_list_content else text,
-        },
-    }
+def test_the_turn_boundary_is_judged_by_record_shape_alone(tmp_path) -> None:
+    """Mirrors the reference: shape and interrupt-marker text, nothing else.
+
+    No attempt is made to tell typed text from harness-injected text by any
+    other signal. This predicate only bounds how far back context is read; it
+    never decides what is logged as a user message, so widening it on a guess
+    would move turn boundaries without making the log more faithful.
+    """
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            assistant_text_record("OUTPUT BEFORE"),
+            {
+                "type": "user",
+                "isSidechain": False,
+                "isMeta": True,
+                "message": {"role": "user", "content": "<system-reminder>x</system-reminder>"},
+            },
+            assistant_text_record("OUTPUT AFTER"),
+        ],
+    )
+    recent_output = read_agent_output_since_last_user_prompt(transcript_path, 4000)
+    assert "OUTPUT AFTER" in recent_output
+    assert "OUTPUT BEFORE" not in recent_output
 
 
-def test_injected_meta_records_do_not_start_a_new_turn_window(tmp_path) -> None:
-    """A skill load mid-turn would otherwise truncate the captured context."""
+def test_an_attachment_style_interrupt_marker_is_still_a_marker(tmp_path) -> None:
     transcript_path = write_transcript(
         tmp_path,
         [
             user_prompt_record("do the work"),
-            assistant_text_record("OUTPUT BEFORE THE INJECTION"),
-            injected_meta_user_record("<system-reminder>noise</system-reminder>"),
-            injected_meta_user_record("Base directory for this skill: /x", as_list_content=True),
-            assistant_text_record("OUTPUT AFTER THE INJECTION"),
+            assistant_text_record("OUTPUT BEFORE THE CANCEL"),
+            {
+                "type": "user",
+                "isSidechain": False,
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "[Request interrupted by user for tool use]",
+                        }
+                    ],
+                },
+            },
         ],
     )
-    recent_output = read_agent_output_since_last_user_prompt(transcript_path, 4000)
-    assert "OUTPUT BEFORE THE INJECTION" in recent_output
-    assert "OUTPUT AFTER THE INJECTION" in recent_output
+    assert "OUTPUT BEFORE THE CANCEL" in read_agent_output_since_last_user_prompt(
+        transcript_path, 2000
+    )
+
+
+def test_list_content_prompt_text_is_joined_with_newlines(tmp_path) -> None:
+    """Matches the reference's join, which the incoming-prompt match relies on."""
+    from context_handoff.adapters.claude_cli.claude_cli_transcript_reader import (
+        extract_user_prompt_text,
+    )
+
+    assert (
+        extract_user_prompt_text(
+            {
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "first"},
+                        {"type": "text", "text": "second"},
+                    ]
+                }
+            }
+        )
+        == "first\nsecond"
+    )
+
+
+def test_bare_string_blocks_in_list_content_are_kept(tmp_path) -> None:
+    from context_handoff.adapters.claude_cli.claude_cli_transcript_reader import (
+        extract_user_prompt_text,
+    )
+
+    assert (
+        extract_user_prompt_text({"message": {"content": ["bare block"]}})
+        == "bare block"
+    )
 
 
 def test_a_missing_transcript_yields_empty_recent_output(tmp_path) -> None:
