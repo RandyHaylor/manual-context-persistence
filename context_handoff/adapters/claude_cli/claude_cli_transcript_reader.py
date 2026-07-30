@@ -25,6 +25,10 @@ TRANSCRIPT_RECORD_TYPE_USER = "user"
 TRANSCRIPT_RECORD_TYPE_ATTACHMENT = "attachment"
 ATTACHMENT_TYPE_QUEUED_COMMAND = "queued_command"
 
+# The CLI records a cancelled turn as a user record with this text. It is not
+# something the user typed, so it must never be treated as a prompt.
+INTERRUPT_MARKER_TEXT_PREFIX = "[Request interrupted by user"
+
 
 def _iterate_transcript_records(transcript_path: str):
     """Yield decoded records, skipping anything unreadable.
@@ -66,18 +70,59 @@ def _extract_assistant_text(record: dict[str, Any]) -> Optional[str]:
     return joined_text or None
 
 
-def _is_user_prompt_record(record: dict[str, Any]) -> bool:
-    """True for a message the user typed, false for a tool result.
+def extract_user_prompt_text(record: dict[str, Any]) -> Optional[str]:
+    """Return the text of a genuine typed prompt, or None if this is not one.
 
-    The distinguishing feature is the content type: a typed prompt is a plain
-    string, a tool result is a list of blocks.
+    Three record shapes wear the type "user" and only one of them is a prompt:
+
+      * a plain string is a typed prompt — unless it is an interrupt marker,
+        which the CLI writes when a turn is cancelled;
+      * a list containing tool_result blocks is tool output;
+      * a list of text blocks is also a typed prompt, which is how a prompt
+        carrying an attachment is recorded.
+
+    Getting this wrong is not cosmetic. Treating an interrupt marker as a
+    prompt moves the turn boundary past work the user has not yet seen
+    accounted for, and this system cancels a session on every rotation, so
+    that would be the normal path rather than an edge case. Treating an
+    attachment-style prompt as *not* a prompt leaves the boundary too far
+    back, which re-reads material that was already handled.
     """
     if record.get("type") != TRANSCRIPT_RECORD_TYPE_USER:
-        return False
+        return None
+    # Injected content — system reminders, skill loads, tool-sourced text —
+    # also arrives as a user record, and is flagged isMeta. Verified against a
+    # real transcript: every genuinely typed prompt had the flag absent, and
+    # every injected record had it true.
+    if record.get("isMeta"):
+        return None
     message = record.get("message")
     if not isinstance(message, dict):
-        return False
-    return isinstance(message.get("content"), str)
+        return None
+
+    content = message.get("content")
+    if isinstance(content, str):
+        if content.strip().startswith(INTERRUPT_MARKER_TEXT_PREFIX):
+            return None
+        return content
+    if isinstance(content, list):
+        if any(
+            isinstance(block, dict) and block.get("type") == "tool_result"
+            for block in content
+        ):
+            return None
+        text_chunks = [
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        joined_text = "".join(text_chunks)
+        return joined_text if joined_text else None
+    return None
+
+
+def _is_user_prompt_record(record: dict[str, Any]) -> bool:
+    return extract_user_prompt_text(record) is not None
 
 
 def _extract_tool_result_text(record: dict[str, Any]) -> Optional[str]:
@@ -157,8 +202,10 @@ def find_user_messages_sent_while_agent_was_working(
         if _is_main_session_record(record) and _is_user_prompt_record(record)
     ]
 
+    # Extracted rather than indexed: a prompt's content may be a list of text
+    # blocks, and str() of that list would never match the incoming text.
     incoming_prompt_is_already_recorded = bool(genuine_prompt_indices) and (
-        str(all_records[genuine_prompt_indices[-1]]["message"]["content"]).strip()
+        (extract_user_prompt_text(all_records[genuine_prompt_indices[-1]]) or "").strip()
         == incoming_prompt_text_stripped
     )
     if incoming_prompt_is_already_recorded:

@@ -204,5 +204,89 @@ def test_a_turn_with_no_prior_user_prompt_returns_everything_available(
     )
 
 
+def interrupt_marker_record() -> dict:
+    return {
+        "type": "user",
+        "isSidechain": False,
+        "message": {
+            "role": "user",
+            "content": "[Request interrupted by user for tool use]",
+        },
+    }
+
+
+def attachment_style_user_prompt_record(prompt_text: str) -> dict:
+    """A typed prompt carrying an attachment: list content, no tool_result."""
+    return {
+        "type": "user",
+        "isSidechain": False,
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": prompt_text}],
+        },
+    }
+
+
+def test_an_interrupt_marker_does_not_discard_the_cancelled_turns_output(
+    tmp_path,
+) -> None:
+    """A cancelled turn still produced the context the next prompt answers."""
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            user_prompt_record("do the work"),
+            assistant_text_record("OUTPUT BEFORE THE CANCEL"),
+            interrupt_marker_record(),
+        ],
+    )
+    assert "OUTPUT BEFORE THE CANCEL" in read_agent_output_since_last_user_prompt(
+        transcript_path, 2000
+    )
+
+
+def test_an_attachment_style_prompt_starts_a_new_turn_window(tmp_path) -> None:
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            assistant_text_record("OLD TURN OUTPUT"),
+            attachment_style_user_prompt_record("a prompt with a pasted file"),
+            assistant_text_record("CURRENT TURN OUTPUT"),
+        ],
+    )
+    recent_output = read_agent_output_since_last_user_prompt(transcript_path, 2000)
+    assert "CURRENT TURN OUTPUT" in recent_output
+    assert "OLD TURN OUTPUT" not in recent_output
+
+
+def injected_meta_user_record(text: str, as_list_content: bool = False) -> dict:
+    """Injected content — a system reminder or skill load — not typed by anyone."""
+    return {
+        "type": "user",
+        "isSidechain": False,
+        "isMeta": True,
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": text}] if as_list_content else text,
+        },
+    }
+
+
+def test_injected_meta_records_do_not_start_a_new_turn_window(tmp_path) -> None:
+    """A skill load mid-turn would otherwise truncate the captured context."""
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            user_prompt_record("do the work"),
+            assistant_text_record("OUTPUT BEFORE THE INJECTION"),
+            injected_meta_user_record("<system-reminder>noise</system-reminder>"),
+            injected_meta_user_record("Base directory for this skill: /x", as_list_content=True),
+            assistant_text_record("OUTPUT AFTER THE INJECTION"),
+        ],
+    )
+    recent_output = read_agent_output_since_last_user_prompt(transcript_path, 4000)
+    assert "OUTPUT BEFORE THE INJECTION" in recent_output
+    assert "OUTPUT AFTER THE INJECTION" in recent_output
+
+
 def test_a_missing_transcript_yields_empty_recent_output(tmp_path) -> None:
     assert read_agent_output_since_last_user_prompt(str(tmp_path / "absent.jsonl"), 2000) == ""

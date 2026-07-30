@@ -188,6 +188,100 @@ def test_blank_queued_messages_are_ignored(tmp_path) -> None:
     assert find_user_messages_sent_while_agent_was_working(transcript_path, "next") == []
 
 
+def interrupt_marker_record() -> dict:
+    return {
+        "type": "user",
+        "isSidechain": False,
+        "message": {
+            "role": "user",
+            "content": "[Request interrupted by user for tool use]",
+        },
+    }
+
+
+def attachment_style_user_prompt_record(prompt_text: str) -> dict:
+    """A typed prompt carrying an attachment: list content, no tool_result."""
+    return {
+        "type": "user",
+        "isSidechain": False,
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": prompt_text}],
+        },
+    }
+
+
+def test_an_interrupt_marker_does_not_move_the_anchor(tmp_path) -> None:
+    """This loop sends ctrl+c every rotation, so interrupts are the normal path.
+
+    If a cancel marker counted as a genuine prompt it would drag the anchor
+    past the user's aside, and that aside would never be logged at all.
+    """
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            genuine_user_prompt_record("do the work"),
+            queued_human_message_record("aside typed before the interrupt"),
+            interrupt_marker_record(),
+        ],
+    )
+    assert find_user_messages_sent_while_agent_was_working(
+        transcript_path, "the next prompt"
+    ) == ["aside typed before the interrupt"]
+
+
+def test_an_attachment_style_prompt_does_move_the_anchor(tmp_path) -> None:
+    """It is a real typed prompt, so anything before it was already logged."""
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            genuine_user_prompt_record("turn one"),
+            queued_human_message_record("OLD ASIDE ALREADY HANDLED"),
+            attachment_style_user_prompt_record("turn two with a pasted file"),
+            queued_human_message_record("new aside"),
+        ],
+    )
+    assert find_user_messages_sent_while_agent_was_working(
+        transcript_path, "turn three"
+    ) == ["new aside"]
+
+
+def test_an_attachment_style_incoming_prompt_is_recognised_as_already_recorded(
+    tmp_path,
+) -> None:
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            genuine_user_prompt_record("turn one"),
+            queued_human_message_record("mid-turn aside"),
+            attachment_style_user_prompt_record("turn two"),
+        ],
+    )
+    assert find_user_messages_sent_while_agent_was_working(
+        transcript_path, "turn two"
+    ) == ["mid-turn aside"]
+
+
+def test_injected_meta_records_do_not_move_the_anchor(tmp_path) -> None:
+    """A system reminder between prompt and aside must not hide the aside."""
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            genuine_user_prompt_record("do the work"),
+            {
+                "type": "user",
+                "isSidechain": False,
+                "isMeta": True,
+                "message": {"role": "user", "content": "<system-reminder>x</system-reminder>"},
+            },
+            queued_human_message_record("aside after an injected record"),
+        ],
+    )
+    assert find_user_messages_sent_while_agent_was_working(
+        transcript_path, "the next prompt"
+    ) == ["aside after an injected record"]
+
+
 def test_a_transcript_with_no_prior_prompt_still_recovers_queued_messages(
     tmp_path,
 ) -> None:
