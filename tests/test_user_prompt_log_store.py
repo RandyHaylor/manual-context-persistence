@@ -8,6 +8,7 @@ context, not the requirement itself.
 from __future__ import annotations
 
 import json
+import os
 
 from context_handoff.user_prompt_log.user_prompt_log_store import (
     MAXIMUM_PRE_SUBMISSION_CONTENT_CHARACTERS,
@@ -120,7 +121,8 @@ def test_a_corrupt_log_file_reads_as_empty_rather_than_raising(tmp_path) -> None
 
 def test_appending_after_corruption_starts_a_usable_log_again(tmp_path) -> None:
     store = build_store(tmp_path)
-    with open(store.user_prompt_log_file_path_creating_directory(), "w", encoding="utf-8") as log_file:
+    os.makedirs(os.path.dirname(store.user_prompt_log_file_path), exist_ok=True)
+    with open(store.user_prompt_log_file_path, "w", encoding="utf-8") as log_file:
         log_file.write("{ not json")
     store.append_user_prompt_entry("session-a", "after corruption")
     assert [

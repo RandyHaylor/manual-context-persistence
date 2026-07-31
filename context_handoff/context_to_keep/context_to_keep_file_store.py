@@ -19,7 +19,9 @@ from __future__ import annotations
 import datetime
 import json
 import os
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
+
+from context_handoff.project_state.project_state_directory import ProjectStateDirectory
 
 from .context_to_keep_package import (
     ContextToKeepPackage,
@@ -27,7 +29,6 @@ from .context_to_keep_package import (
     parse_context_to_keep_package,
 )
 
-CLAUDE_PROJECT_SUBDIRECTORY_NAME = ".claude"
 CONTEXT_TO_KEEP_FILE_NAME = "context-to-keep.json"
 CONTEXT_TO_KEEP_HISTORY_DIRECTORY_NAME = "context-to-keep-history"
 ROTATED_AT_TIMESTAMP_FIELD_NAME = "rotated_at_timestamp"
@@ -43,46 +44,33 @@ class ContextToKeepFileStore:
         project_directory: str,
         generate_timestamp_text: Optional[Callable[[], str]] = None,
     ) -> None:
-        self._project_directory = project_directory
+        project_state_directory = ProjectStateDirectory(project_directory)
+        self._pending_document = project_state_directory.json_document(
+            CONTEXT_TO_KEEP_FILE_NAME
+        )
+        self._history_directory = project_state_directory.subdirectory_path(
+            CONTEXT_TO_KEEP_HISTORY_DIRECTORY_NAME
+        )
         self._generate_timestamp_text = (
             generate_timestamp_text or generate_utc_timestamp_text
         )
 
     @property
-    def claude_directory(self) -> str:
-        return os.path.join(self._project_directory, CLAUDE_PROJECT_SUBDIRECTORY_NAME)
-
-    @property
     def context_to_keep_file_path(self) -> str:
-        return os.path.join(self.claude_directory, CONTEXT_TO_KEEP_FILE_NAME)
+        return self._pending_document.file_path
 
     @property
     def context_to_keep_history_directory(self) -> str:
-        return os.path.join(
-            self.claude_directory, CONTEXT_TO_KEEP_HISTORY_DIRECTORY_NAME
-        )
-
-    def _read_pending_dictionary(self) -> Optional[dict[str, Any]]:
-        if not os.path.exists(self.context_to_keep_file_path):
-            return None
-        with open(self.context_to_keep_file_path, "r", encoding="utf-8") as pending_file:
-            pending_file_text = pending_file.read().strip()
-        if not pending_file_text:
-            return None
-        try:
-            decoded = json.loads(pending_file_text)
-        except json.JSONDecodeError:
-            return None
-        return decoded if isinstance(decoded, dict) else None
+        return self._history_directory
 
     def read_pending_context_to_keep_package(self) -> Optional[ContextToKeepPackage]:
         """Return the pending package, or None when there is nothing usable.
 
-        A malformed file reads as None rather than raising: the writer is an
-        agent, and a bad package must not stall the turn loop.
+        A malformed package reads as None rather than raising: the writer is an
+        agent, and one bad package must not stall the turn loop.
         """
-        pending_dictionary = self._read_pending_dictionary()
-        if pending_dictionary is None:
+        pending_dictionary = self._pending_document.read_dictionary_or_default({})
+        if not pending_dictionary:
             return None
         try:
             return parse_context_to_keep_package(pending_dictionary)
@@ -95,11 +83,7 @@ class ContextToKeepFileStore:
     def write_pending_context_to_keep_package(
         self, package: ContextToKeepPackage
     ) -> str:
-        os.makedirs(self.claude_directory, exist_ok=True)
-        with open(self.context_to_keep_file_path, "w", encoding="utf-8") as pending_file:
-            json.dump(package.to_json_dictionary(), pending_file, indent=2)
-            pending_file.write("\n")
-        return self.context_to_keep_file_path
+        return self._pending_document.write_dictionary(package.to_json_dictionary())
 
     def _allocate_unused_history_path(self, timestamp_text: str) -> str:
         """Return a history path that does not already exist.
@@ -129,8 +113,8 @@ class ContextToKeepFileStore:
         Raises ``FileNotFoundError`` when nothing is pending: rotating nothing
         would create an empty archive entry and mask the real problem.
         """
-        pending_dictionary = self._read_pending_dictionary()
-        if pending_dictionary is None:
+        pending_dictionary = self._pending_document.read_dictionary_or_default({})
+        if not pending_dictionary:
             raise FileNotFoundError(
                 f"nothing pending to rotate at {self.context_to_keep_file_path}"
             )
@@ -143,9 +127,8 @@ class ContextToKeepFileStore:
             history_path
         )[len("context-to-keep-") : -len(".json")]
         with open(history_path, "w", encoding="utf-8") as history_file:
-            json.dump(archived_dictionary, history_file, indent=2)
+            json.dump(archived_dictionary, history_file, indent=2, ensure_ascii=False)
             history_file.write("\n")
 
-        with open(self.context_to_keep_file_path, "w", encoding="utf-8"):
-            pass
+        self._pending_document.write_empty()
         return history_path

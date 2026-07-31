@@ -30,6 +30,7 @@ from context_handoff.user_prompt_log.user_facing_session_registry import (
 )
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 
+from .branch_session_briefing import build_branch_session_briefing_text
 from .handoff_message_composer import compose_handoff_message_for_base_session
 
 # One interrupt cancels the agent's current turn; a second exits the session.
@@ -39,9 +40,6 @@ SHARED_WINDOW_STATUS_TEXT_WHILE_UPDATING_BASE = "updating base session..."
 
 DEFAULT_BASE_SESSION_ACKNOWLEDGMENT_TIMEOUT_SECONDS = 180.0
 
-BRANCH_SEED_PROMPT_TEXT = (
-    "[context-handoff branch seed] (orchestrator process seed, ignore this)"
-)
 
 
 class NoPendingHandoffError(RuntimeError):
@@ -106,7 +104,10 @@ class TurnRotationOrchestrator:
         branch_creation_result = self._harness.create_branch_session_from_base_session(
             base_session_identifier=self._base_session_identifier,
             working_directory=self._project_directory,
-            branch_seed_prompt_text=BRANCH_SEED_PROMPT_TEXT,
+            # The briefing IS the seed: it both materializes the fork on disk
+            # and tells the branch the handoff protocol it is expected to
+            # follow.
+            branch_seed_prompt_text=build_branch_session_briefing_text(),
         )
         # Registered only now, after the seeding call has finished. The seed
         # goes through the same non-interactive path a user prompt would, so

@@ -11,12 +11,12 @@ fine.
 """
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from typing import Any
 
-CLAUDE_PROJECT_SUBDIRECTORY_NAME = ".claude"
+from context_handoff.project_state.project_state_directory import ProjectStateDirectory
+
 PROJECT_SETTINGS_FILE_NAME = "settings.local.json"
 
 STOP_HOOK_EVENT_NAME = "Stop"
@@ -48,8 +48,10 @@ class HookRegistrationReport:
 
 
 def build_project_settings_path(project_directory: str) -> str:
-    return os.path.join(
-        project_directory, CLAUDE_PROJECT_SUBDIRECTORY_NAME, PROJECT_SETTINGS_FILE_NAME
+    return (
+        ProjectStateDirectory(project_directory)
+        .json_document(PROJECT_SETTINGS_FILE_NAME)
+        .file_path
     )
 
 
@@ -77,9 +79,13 @@ def _event_registers_script(
 def inspect_hook_registration_for_project(
     project_directory: str,
 ) -> HookRegistrationReport:
-    settings_path = build_project_settings_path(project_directory)
+    settings_document = ProjectStateDirectory(project_directory).json_document(
+        PROJECT_SETTINGS_FILE_NAME
+    )
+    settings_path = settings_document.file_path
+    settings_file_exists = os.path.exists(settings_path)
 
-    if not os.path.exists(settings_path):
+    if not settings_file_exists:
         return HookRegistrationReport(
             settings_file_exists=False,
             stop_hook_is_registered=False,
@@ -91,26 +97,15 @@ def inspect_hook_registration_for_project(
             ),
         )
 
-    try:
-        with open(settings_path, "r", encoding="utf-8") as settings_file:
-            settings_dictionary = json.load(settings_file)
-    except (json.JSONDecodeError, OSError) as read_error:
+    settings_dictionary = settings_document.read_dictionary_or_default({})
+    if not settings_dictionary:
         return HookRegistrationReport(
             settings_file_exists=True,
             stop_hook_is_registered=False,
             user_prompt_submit_hook_is_registered=False,
             detail_text=(
-                f"could not read {PROJECT_SETTINGS_FILE_NAME} at {settings_path}: "
-                f"{read_error}"
-            ),
-        )
-    if not isinstance(settings_dictionary, dict):
-        return HookRegistrationReport(
-            settings_file_exists=True,
-            stop_hook_is_registered=False,
-            user_prompt_submit_hook_is_registered=False,
-            detail_text=(
-                f"{PROJECT_SETTINGS_FILE_NAME} at {settings_path} is not a JSON object"
+                f"could not read usable settings from {PROJECT_SETTINGS_FILE_NAME} at "
+                f"{settings_path}"
             ),
         )
 

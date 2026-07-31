@@ -13,13 +13,13 @@ the flag is what lets the next handoff pick it up without resending everything.
 """
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
-CLAUDE_PROJECT_SUBDIRECTORY_NAME = ".claude"
+from context_handoff.project_state.project_state_directory import ProjectStateDirectory
+
 USER_PROMPT_LOG_FILE_NAME = "user-prompt-log.json"
+LOG_ENTRIES_FIELD_NAME = "entries"
 MAXIMUM_PRE_SUBMISSION_CONTENT_CHARACTERS = 2000
 
 
@@ -60,36 +60,24 @@ def cap_pre_submission_content(pre_submission_content: str) -> str:
 
 class UserPromptLogStore:
     def __init__(self, project_directory: str) -> None:
-        self._project_directory = project_directory
-
-    @property
-    def claude_directory(self) -> str:
-        return os.path.join(self._project_directory, CLAUDE_PROJECT_SUBDIRECTORY_NAME)
+        self._log_document = ProjectStateDirectory(project_directory).json_document(
+            USER_PROMPT_LOG_FILE_NAME
+        )
 
     @property
     def user_prompt_log_file_path(self) -> str:
-        return os.path.join(self.claude_directory, USER_PROMPT_LOG_FILE_NAME)
-
-    def user_prompt_log_file_path_creating_directory(self) -> str:
-        os.makedirs(self.claude_directory, exist_ok=True)
-        return self.user_prompt_log_file_path
+        return self._log_document.file_path
 
     def _read_all_entries(self) -> list[UserPromptLogEntry]:
-        """Return every logged entry; a damaged log reads as empty.
+        """Return every logged entry, skipping any that cannot be understood.
 
-        Raising here would break the hook that appends, which is the one thing
-        that must keep working.
+        An entry the current build cannot parse is dropped rather than raised
+        on: the caller is a hook, and a hook that raises loses the prompt it
+        was invoked to record.
         """
-        if not os.path.exists(self.user_prompt_log_file_path):
-            return []
-        try:
-            with open(self.user_prompt_log_file_path, "r", encoding="utf-8") as log_file:
-                decoded_log = json.load(log_file)
-        except (json.JSONDecodeError, OSError):
-            return []
-        if not isinstance(decoded_log, dict):
-            return []
-        raw_entries = decoded_log.get("entries")
+        raw_entries = self._log_document.read_dictionary_or_default({}).get(
+            LOG_ENTRIES_FIELD_NAME
+        )
         if not isinstance(raw_entries, list):
             return []
         parsed_entries: list[UserPromptLogEntry] = []
@@ -103,15 +91,9 @@ class UserPromptLogStore:
         return parsed_entries
 
     def _write_all_entries(self, entries: list[UserPromptLogEntry]) -> None:
-        os.makedirs(self.claude_directory, exist_ok=True)
-        with open(self.user_prompt_log_file_path, "w", encoding="utf-8") as log_file:
-            json.dump(
-                {"entries": [entry.to_json_dictionary() for entry in entries]},
-                log_file,
-                indent=2,
-                ensure_ascii=False,
-            )
-            log_file.write("\n")
+        self._log_document.write_dictionary(
+            {LOG_ENTRIES_FIELD_NAME: [entry.to_json_dictionary() for entry in entries]}
+        )
 
     def append_user_prompt_entry(
         self,

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Launch the context-handoff turn loop for a project.
 
-This is the only place the real Claude CLI and real tmux adapters are wired to
-the core. Everything it calls has been tested independently; this file is
-composition and command-line handling.
+    ./run_context_handoff.py                      # asks: new base session, or resume?
+    ./run_context_handoff.py --new-base           # skip the question, create one
+    ./run_context_handoff.py --resume-base <id>   # skip the question, resume one
 
-    ./run_context_handoff.py                      # new base session
-    ./run_context_handoff.py --resume-base <id>   # continue an existing one
+This file parses arguments and builds the concrete Claude CLI and tmux
+adapters. Every decision it used to make now lives in
+``context_handoff.application.turn_loop_application``, where it is tested.
 
 Assumes the Claude CLI is installed and already logged in through its own local
 OAuth flow. Nothing here prompts for or stores credentials.
@@ -14,6 +15,7 @@ OAuth flow. Nothing here prompts for or stores credentials.
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import sys
 
@@ -33,30 +35,13 @@ from context_handoff.adapters.tmux.tmux_command_runner import (  # noqa: E402
 from context_handoff.adapters.tmux.tmux_user_interface_control_adapter import (  # noqa: E402
     TmuxUserInterfaceControlAdapter,
 )
-from context_handoff.context_to_keep.context_to_keep_file_store import (  # noqa: E402
-    ContextToKeepFileStore,
+from context_handoff.application.turn_loop_application import (  # noqa: E402
+    TurnLoopApplicationRequest,
+    run_turn_loop_application,
 )
 from context_handoff.orchestration.turn_loop_runner import (  # noqa: E402
     run_turn_loop_until_stopped,
 )
-from context_handoff.orchestration.turn_rotation_orchestrator import (  # noqa: E402
-    TurnRotationOrchestrator,
-)
-from context_handoff.startup.base_session_choice_prompt import (  # noqa: E402
-    ask_whether_to_create_or_resume_base_session,
-)
-from context_handoff.startup.base_session_resolver import (  # noqa: E402
-    resolve_base_session_for_startup,
-)
-from context_handoff.startup.hook_registration_preflight import (  # noqa: E402
-    inspect_hook_registration_for_project,
-)
-from context_handoff.user_prompt_log.user_prompt_log_store import (  # noqa: E402
-    UserPromptLogStore,
-)
-
-EXIT_CODE_SUCCESS = 0
-EXIT_CODE_PREFLIGHT_FAILED = 2
 
 
 def parse_command_line_arguments(argv: list[str]) -> argparse.Namespace:
@@ -82,7 +67,7 @@ def parse_command_line_arguments(argv: list[str]) -> argparse.Namespace:
         "--window-name",
         dest="shared_window_identifier",
         default=None,
-        help="name for the shared window; defaults to a generated one",
+        help="name for the shared window; defaults to one derived from the base session",
     )
     parser.add_argument(
         "--skip-hook-preflight",
@@ -96,99 +81,35 @@ def main(argv: list[str]) -> int:
     arguments = parse_command_line_arguments(argv)
     project_directory = os.path.abspath(arguments.project_directory)
 
-    harness = ClaudeCliHarnessAdapter(
-        process_launcher=SubprocessNonInteractiveProcessLauncher(),
-        project_working_directory=project_directory,
-    )
-
-    availability_report = harness.verify_harness_available_and_authorized()
-    if not availability_report.is_available:
-        print(f"harness unavailable: {availability_report.detail_text}", file=sys.stderr)
-        return EXIT_CODE_PREFLIGHT_FAILED
-    print(f"harness: {availability_report.detail_text}")
-
-    hook_report = inspect_hook_registration_for_project(project_directory)
-    print(f"hooks: {hook_report.detail_text}")
-    if not hook_report.is_ready_to_run and not arguments.skip_hook_preflight:
-        # Starting without hooks looks fine and captures nothing, so this stops
-        # rather than warns.
-        print(
-            "refusing to start without the capture hooks; pass --skip-hook-preflight "
-            "to override",
-            file=sys.stderr,
-        )
-        return EXIT_CODE_PREFLIGHT_FAILED
-
-    # The flags exist so the app can run unattended; when neither is given, the
-    # spec's startup sequence asks.
-    base_session_identifier_to_resume = arguments.base_session_identifier_to_resume
-    if (
-        base_session_identifier_to_resume is None
-        and not arguments.create_new_base_session_without_asking
-    ):
-        try:
-            base_session_choice = ask_whether_to_create_or_resume_base_session(
-                read_answer=input,
-                write_line=print,
-                known_base_session_identifiers=(),
-            )
-        except EOFError:
-            print(
-                "no answer available on stdin; pass --new-base or --resume-base",
-                file=sys.stderr,
-            )
-            return EXIT_CODE_PREFLIGHT_FAILED
-        base_session_identifier_to_resume = (
-            base_session_choice.base_session_identifier_to_resume
-        )
-
-    resolved_base_session = resolve_base_session_for_startup(
-        harness=harness,
-        working_directory=project_directory,
-        base_session_identifier_to_resume=base_session_identifier_to_resume,
-    )
-    print(
-        f"base session: {resolved_base_session.session_identifier} "
-        f"({'created' if resolved_base_session.was_newly_created else 'resumed'})"
-    )
-
-    shared_window_identifier = (
-        arguments.shared_window_identifier
-        or f"context-handoff-{resolved_base_session.session_identifier[:8]}"
-    )
-
-    orchestrator = TurnRotationOrchestrator(
-        harness=harness,
+    return run_turn_loop_application(
+        request=TurnLoopApplicationRequest(
+            project_directory=project_directory,
+            base_session_identifier_to_resume=(
+                arguments.base_session_identifier_to_resume
+            ),
+            create_new_base_session_without_asking=(
+                arguments.create_new_base_session_without_asking
+            ),
+            shared_window_identifier=arguments.shared_window_identifier,
+            skip_hook_preflight=arguments.skip_hook_preflight,
+        ),
+        harness=ClaudeCliHarnessAdapter(
+            process_launcher=SubprocessNonInteractiveProcessLauncher(),
+            project_working_directory=project_directory,
+        ),
         user_interface_control=TmuxUserInterfaceControlAdapter(
             tmux_command_runner=SubprocessTmuxCommandRunner()
         ),
-        context_to_keep_store=ContextToKeepFileStore(project_directory),
-        user_prompt_log_store=UserPromptLogStore(project_directory),
-        project_directory=project_directory,
-        base_session_identifier=resolved_base_session.session_identifier,
-        shared_window_identifier=shared_window_identifier,
-    )
-
-    first_branch_session_identifier = orchestrator.start_first_branch_session()
-    print(f"shared window: {shared_window_identifier}")
-    print(f"first branch: {first_branch_session_identifier}")
-    print("watching for completed turns; press Ctrl-C here to stop")
-
-    try:
-        completed_rotation_count = run_turn_loop_until_stopped(
-            orchestrator=orchestrator,
+        run_turn_loop_with=functools.partial(
+            run_turn_loop_until_stopped,
             should_continue_running=lambda: True,
             report_rotation_error=lambda rotation_error: print(
                 f"rotation failed, continuing: {rotation_error}", file=sys.stderr
             ),
-        )
-    except KeyboardInterrupt:
-        # The shared window is deliberately left open: the user may still be
-        # mid-conversation in it, and closing it would discard their turn.
-        print("\nstopped; the shared window is still open")
-        return EXIT_CODE_SUCCESS
-    print(f"completed {completed_rotation_count} rotations")
-    return EXIT_CODE_SUCCESS
+        ),
+        read_answer=input,
+        write_line=print,
+    )
 
 
 if __name__ == "__main__":

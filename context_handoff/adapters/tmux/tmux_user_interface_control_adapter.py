@@ -15,7 +15,12 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 from typing import Callable, Optional
+
+# Long enough for a full-screen interactive agent to register typed text before
+# the submit keystroke lands, short enough not to be felt between turns.
+DEFAULT_INPUT_SETTLE_DELAY_SECONDS = 1.0
 
 from context_handoff.interfaces.user_interface_control_interface import (
     UserInterfaceControlInterface,
@@ -93,12 +98,16 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
         tmux_command_runner: Optional[TmuxCommandRunnerInterface] = None,
         pane_output_log_directory: str = DEFAULT_PANE_OUTPUT_LOG_DIRECTORY,
         attach_terminal_emulator: Optional[Callable[[str], None]] = None,
+        wait_for_input_to_settle: Optional[Callable[[float], None]] = None,
+        input_settle_delay_seconds: float = DEFAULT_INPUT_SETTLE_DELAY_SECONDS,
     ) -> None:
         self._tmux_command_runner = tmux_command_runner or SubprocessTmuxCommandRunner()
         self._pane_output_log_directory = pane_output_log_directory
         self._attach_terminal_emulator = (
             attach_terminal_emulator or attach_first_available_terminal_emulator
         )
+        self._wait_for_input_to_settle = wait_for_input_to_settle or time.sleep
+        self._input_settle_delay_seconds = input_settle_delay_seconds
         self._window_identifiers_already_attached: set[str] = set()
 
     def build_pane_output_log_path(self, window_identifier: str) -> str:
@@ -113,8 +122,21 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
     def _type_shell_line_into_window(
         self, window_identifier: str, shell_line: str
     ) -> None:
+        """Type a line, let it register, then submit it.
+
+        Typing and submitting are deliberately separate calls. An interactive
+        agent running in the pane reads its input through a full-screen editor
+        rather than a shell line discipline, and a send-keys that carries the
+        text and the Enter together arrives faster than the editor registers
+        the text — leaving the line sitting unsubmitted in the input box. A
+        real driven session is what exposed this; a shell alone never would.
+        """
         self._tmux_command_runner.run_tmux_command(
-            ["send-keys", "-t", window_identifier, shell_line, "Enter"]
+            ["send-keys", "-t", window_identifier, shell_line]
+        )
+        self._wait_for_input_to_settle(self._input_settle_delay_seconds)
+        self._tmux_command_runner.run_tmux_command(
+            ["send-keys", "-t", window_identifier, "Enter"]
         )
 
     def open_shared_window(self, window_identifier: str, working_directory: str) -> None:

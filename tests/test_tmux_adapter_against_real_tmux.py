@@ -34,6 +34,10 @@ def adapter_and_window_identifier(tmp_path):
         tmux_command_runner=SubprocessTmuxCommandRunner(),
         pane_output_log_directory=str(tmp_path / "pane-logs"),
         attach_terminal_emulator=lambda _window_identifier: None,
+        # A bare shell needs no settle time; the delay exists for a
+        # full-screen interactive agent. Keeping it short here keeps the suite
+        # fast without weakening what these tests check.
+        input_settle_delay_seconds=0.05,
     )
     try:
         yield adapter, window_identifier

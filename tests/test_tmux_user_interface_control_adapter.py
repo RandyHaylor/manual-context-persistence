@@ -120,10 +120,12 @@ def test_command_lines_are_shell_quoted_before_being_typed(tmp_path) -> None:
         ["claude", "--resume", "abc", "--name", "branch with spaces"],
     )
 
-    send_keys_argv = fake_runner.find_recorded_argvs_for_subcommand("send-keys")[-1]
-    typed_shell_line = send_keys_argv[send_keys_argv.index("-t") + 2]
+    # Typing and submitting are separate calls, so the text is in the one
+    # before the Enter.
+    send_keys_argvs = fake_runner.find_recorded_argvs_for_subcommand("send-keys")
+    typed_shell_line = send_keys_argvs[-2][send_keys_argvs[-2].index("-t") + 2]
     assert "'branch with spaces'" in typed_shell_line
-    assert send_keys_argv[-1] == "Enter"
+    assert send_keys_argvs[-1][-1] == "Enter"
 
 
 def test_interrupt_is_sent_the_requested_number_of_times(tmp_path) -> None:
@@ -152,8 +154,8 @@ def test_status_line_is_echoed_into_the_window(tmp_path) -> None:
         WINDOW_IDENTIFIER_UNDER_TEST, "updating base session..."
     )
 
-    send_keys_argv = fake_runner.find_recorded_argvs_for_subcommand("send-keys")[-1]
-    typed_shell_line = send_keys_argv[send_keys_argv.index("-t") + 2]
+    send_keys_argvs = fake_runner.find_recorded_argvs_for_subcommand("send-keys")
+    typed_shell_line = send_keys_argvs[-2][send_keys_argvs[-2].index("-t") + 2]
     assert typed_shell_line.startswith("echo ")
     assert "updating base session..." in typed_shell_line
 

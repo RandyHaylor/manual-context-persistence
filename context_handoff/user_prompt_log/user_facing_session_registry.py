@@ -17,42 +17,26 @@ exactly the content this exists to keep out.
 """
 from __future__ import annotations
 
-import json
-import os
-from typing import Any
+from context_handoff.project_state.project_state_directory import ProjectStateDirectory
 
-CLAUDE_PROJECT_SUBDIRECTORY_NAME = ".claude"
 USER_FACING_SESSION_REGISTRY_FILE_NAME = "context-handoff-user-facing-sessions.json"
 REGISTERED_SESSION_IDENTIFIERS_FIELD_NAME = "user_facing_session_identifiers"
 
 
 class UserFacingSessionRegistry:
     def __init__(self, project_directory: str) -> None:
-        self._project_directory = project_directory
-
-    @property
-    def claude_directory(self) -> str:
-        return os.path.join(self._project_directory, CLAUDE_PROJECT_SUBDIRECTORY_NAME)
+        self._registry_document = ProjectStateDirectory(project_directory).json_document(
+            USER_FACING_SESSION_REGISTRY_FILE_NAME
+        )
 
     @property
     def registry_file_path(self) -> str:
-        return os.path.join(
-            self.claude_directory, USER_FACING_SESSION_REGISTRY_FILE_NAME
-        )
+        return self._registry_document.file_path
 
     def read_registered_session_identifiers(self) -> list[str]:
-        if not os.path.exists(self.registry_file_path):
-            return []
-        try:
-            with open(self.registry_file_path, "r", encoding="utf-8") as registry_file:
-                registry_content: Any = json.load(registry_file)
-        except (json.JSONDecodeError, OSError):
-            return []
-        if not isinstance(registry_content, dict):
-            return []
-        registered_identifiers = registry_content.get(
-            REGISTERED_SESSION_IDENTIFIERS_FIELD_NAME
-        )
+        registered_identifiers = self._registry_document.read_dictionary_or_default(
+            {}
+        ).get(REGISTERED_SESSION_IDENTIFIERS_FIELD_NAME)
         if not isinstance(registered_identifiers, list):
             return []
         return [
@@ -70,15 +54,10 @@ class UserFacingSessionRegistry:
         already_registered_identifiers = self.read_registered_session_identifiers()
         if session_identifier in already_registered_identifiers:
             return
-        os.makedirs(self.claude_directory, exist_ok=True)
-        with open(self.registry_file_path, "w", encoding="utf-8") as registry_file:
-            json.dump(
-                {
-                    REGISTERED_SESSION_IDENTIFIERS_FIELD_NAME: (
-                        already_registered_identifiers + [session_identifier]
-                    )
-                },
-                registry_file,
-                indent=2,
-            )
-            registry_file.write("\n")
+        self._registry_document.write_dictionary(
+            {
+                REGISTERED_SESSION_IDENTIFIERS_FIELD_NAME: (
+                    already_registered_identifiers + [session_identifier]
+                )
+            }
+        )
