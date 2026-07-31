@@ -163,6 +163,59 @@ def test_the_record_carries_a_human_readable_reason(tmp_path) -> None:
     assert "no_package_in_reply" in read_last_stop_hook_outcome(project_directory)["reason_text"]
 
 
+def test_the_record_says_how_much_reply_the_hook_actually_saw(tmp_path) -> None:
+    """Settles whether a quiet turn means "no package" or "read too early".
+
+    A transcript that later holds a package proves nothing on its own — the
+    hook may have read the file before the agent's final message reached it.
+    Recording the size seen at read time makes the two distinguishable.
+    """
+    project_directory = build_project(tmp_path)
+    reply_text = build_reply_containing_a_package()
+    transcript_path = write_transcript_with_agent_reply(tmp_path, reply_text)
+
+    run_stop_hook(project_directory, transcript_path)
+
+    recorded = read_last_stop_hook_outcome(project_directory)
+    assert recorded["agent_reply_character_count"] == len(reply_text)
+
+
+def test_the_record_carries_the_end_of_what_was_read(tmp_path) -> None:
+    """The package sits at the end, so the tail is where its absence shows."""
+    project_directory = build_project(tmp_path)
+    transcript_path = write_transcript_with_agent_reply(
+        tmp_path, "prose then THE VERY END"
+    )
+
+    run_stop_hook(project_directory, transcript_path)
+
+    assert read_last_stop_hook_outcome(project_directory)[
+        "agent_reply_tail"
+    ].endswith("THE VERY END")
+
+
+def test_the_recorded_tail_is_bounded(tmp_path) -> None:
+    """A diagnostic must not copy a whole transcript into another file."""
+    project_directory = build_project(tmp_path)
+    transcript_path = write_transcript_with_agent_reply(tmp_path, "x" * 10000)
+
+    run_stop_hook(project_directory, transcript_path)
+
+    recorded = read_last_stop_hook_outcome(project_directory)
+    assert recorded["agent_reply_character_count"] == 10000
+    assert len(recorded["agent_reply_tail"]) < 1000
+
+
+def test_a_missing_reply_is_recorded_as_zero_characters(tmp_path) -> None:
+    project_directory = build_project(tmp_path)
+
+    run_stop_hook(project_directory, str(tmp_path / "absent.jsonl"))
+
+    recorded = read_last_stop_hook_outcome(project_directory)
+    assert recorded["agent_reply_character_count"] == 0
+    assert recorded["agent_reply_tail"] == ""
+
+
 def test_reading_before_any_hook_has_run_gives_nothing(tmp_path) -> None:
     assert read_last_stop_hook_outcome(build_project(tmp_path)) == {}
 
