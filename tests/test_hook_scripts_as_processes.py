@@ -20,6 +20,9 @@ from context_handoff.context_to_keep.context_to_keep_package import (
     CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG,
     CONTEXT_TO_KEEP_PACKAGE_VERSION,
 )
+from context_handoff.user_prompt_log.user_facing_session_registry import (
+    UserFacingSessionRegistry,
+)
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 
 HOOKS_DIRECTORY = os.path.join(
@@ -136,6 +139,9 @@ def test_stop_hook_script_writes_the_package_end_to_end(tmp_path) -> None:
 def test_user_prompt_submit_hook_script_logs_the_prompt_end_to_end(tmp_path) -> None:
     project_directory = str(tmp_path / "project")
     os.makedirs(project_directory)
+    UserFacingSessionRegistry(project_directory).register_user_facing_session(
+        "branch-session"
+    )
 
     completed = run_hook_script(
         USER_PROMPT_SUBMIT_HOOK_SCRIPT_PATH,

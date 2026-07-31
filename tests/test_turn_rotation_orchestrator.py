@@ -111,6 +111,26 @@ def test_the_branch_command_line_comes_from_the_harness(test_harness) -> None:
     assert branch_session_identifier in run_command_events[-1][1]
 
 
+def test_each_branch_is_registered_as_a_session_the_user_types_into(
+    test_harness, tmp_path
+) -> None:
+    """Without this the prompt hook cannot tell the user's words from ours."""
+    from context_handoff.user_prompt_log.user_facing_session_registry import (
+        UserFacingSessionRegistry,
+    )
+
+    first_branch = test_harness.orchestrator.start_first_branch_session()
+    registry = UserFacingSessionRegistry(str(tmp_path))
+    assert registry.is_user_facing_session(first_branch) is True
+    # The base session is driven by the orchestrator alone and must never be
+    # mistaken for somewhere the user is typing.
+    assert registry.is_user_facing_session(BASE_SESSION_IDENTIFIER) is False
+
+    test_harness.stage_completed_turn(first_branch)
+    outcome = test_harness.orchestrator.rotate_to_next_branch_session()
+    assert registry.is_user_facing_session(outcome.new_branch_session_identifier) is True
+
+
 def test_rotating_without_a_pending_handoff_raises(test_harness) -> None:
     test_harness.orchestrator.start_first_branch_session()
     with pytest.raises(NoPendingHandoffError):

@@ -16,6 +16,9 @@ from context_handoff.adapters.claude_cli.claude_cli_transcript_reader import (
     find_user_messages_sent_while_agent_was_working,
     read_agent_output_since_last_user_prompt,
 )
+from context_handoff.user_prompt_log.user_facing_session_registry import (
+    UserFacingSessionRegistry,
+)
 from context_handoff.user_prompt_log.user_prompt_log_store import (
     MAXIMUM_PRE_SUBMISSION_CONTENT_CHARACTERS,
     UserPromptLogStore,
@@ -33,6 +36,15 @@ def handle_user_prompt_submit_payload(hook_payload: dict[str, Any]) -> dict[str,
         if not project_directory or not session_identifier:
             return EMPTY_HOOK_RESPONSE
         if not isinstance(user_prompt_text, str) or not user_prompt_text.strip():
+            return EMPTY_HOOK_RESPONSE
+
+        # The gate. This hook also fires for the sessions the orchestrator
+        # drives itself — the base session, and the non-interactive calls that
+        # seed a branch or deliver a handoff — and logging those would record
+        # the orchestrator's own words as the user's.
+        if not UserFacingSessionRegistry(project_directory).is_user_facing_session(
+            session_identifier
+        ):
             return EMPTY_HOOK_RESPONSE
 
         transcript_path = hook_payload.get("transcript_path")

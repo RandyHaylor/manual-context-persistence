@@ -23,6 +23,9 @@ from context_handoff.context_to_keep.context_to_keep_package import (
     CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG,
     CONTEXT_TO_KEEP_PACKAGE_VERSION,
 )
+from context_handoff.user_prompt_log.user_facing_session_registry import (
+    UserFacingSessionRegistry,
+)
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 
 
@@ -164,9 +167,79 @@ def test_stop_hook_does_not_overwrite_an_unconsumed_package(tmp_path) -> None:
 # --- UserPromptSubmit hook -------------------------------------------------
 
 
+def register_user_facing_session(project_directory: str, session_identifier: str) -> None:
+    UserFacingSessionRegistry(project_directory).register_user_facing_session(
+        session_identifier
+    )
+
+
+def test_prompt_hook_ignores_a_session_the_user_is_not_typing_into(tmp_path) -> None:
+    """Reproduces what a real driven session exposed.
+
+    The orchestrator's own non-interactive calls — the base preamble and the
+    branch seed — fire this hook too. Before the gate they were logged as the
+    user's own words and would have been forwarded to the base session under
+    the heading "what the user said, verbatim".
+    """
+    project_directory = str(tmp_path / "project")
+    os.makedirs(project_directory)
+
+    handle_user_prompt_submit_payload(
+        {
+            "cwd": project_directory,
+            "session_id": "the-base-session",
+            "prompt": "You are the base session for a context-handoff project…",
+        }
+    )
+    handle_user_prompt_submit_payload(
+        {
+            "cwd": project_directory,
+            "session_id": "an-unregistered-branch",
+            "prompt": "[context-handoff branch seed] (orchestrator process seed, ignore this)",
+        }
+    )
+
+    assert UserPromptLogStore(project_directory).read_entries_for_session(
+        "the-base-session"
+    ) == []
+    assert UserPromptLogStore(project_directory).read_entries_for_session(
+        "an-unregistered-branch"
+    ) == []
+
+
+def test_prompt_hook_logs_a_registered_branch_but_not_its_seed(tmp_path) -> None:
+    """The seed arrives before registration; the user's prompts arrive after."""
+    project_directory = str(tmp_path / "project")
+    os.makedirs(project_directory)
+
+    handle_user_prompt_submit_payload(
+        {
+            "cwd": project_directory,
+            "session_id": "branch-session",
+            "prompt": "[context-handoff branch seed] (orchestrator process seed, ignore this)",
+        }
+    )
+    register_user_facing_session(project_directory, "branch-session")
+    handle_user_prompt_submit_payload(
+        {
+            "cwd": project_directory,
+            "session_id": "branch-session",
+            "prompt": "what the user actually typed",
+        }
+    )
+
+    assert [
+        entry.user_prompt_text
+        for entry in UserPromptLogStore(project_directory).read_entries_for_session(
+            "branch-session"
+        )
+    ] == ["what the user actually typed"]
+
+
 def test_prompt_hook_logs_the_prompt_verbatim(tmp_path) -> None:
     project_directory = str(tmp_path / "project")
     os.makedirs(project_directory)
+    register_user_facing_session(project_directory, "branch-session")
     awkward_prompt_text = "  keep  my   spacing\tand “quotes”  "
 
     hook_response = handle_user_prompt_submit_payload(
@@ -190,6 +263,7 @@ def test_prompt_hook_captures_the_agent_output_that_preceded_the_prompt(
 ) -> None:
     project_directory = str(tmp_path / "project")
     os.makedirs(project_directory)
+    register_user_facing_session(project_directory, "branch-session")
     transcript_path = write_transcript(
         tmp_path,
         [
@@ -219,6 +293,7 @@ def test_prompt_hook_recovers_a_message_typed_while_the_agent_was_working(
     """That message never fired this hook, so this submission is its only chance."""
     project_directory = str(tmp_path / "project")
     os.makedirs(project_directory)
+    register_user_facing_session(project_directory, "branch-session")
     transcript_path = write_transcript(
         tmp_path,
         [
@@ -271,6 +346,7 @@ def test_prompt_hook_survives_a_payload_with_nothing_in_it() -> None:
 def test_prompt_hook_logs_each_prompt_separately(tmp_path) -> None:
     project_directory = str(tmp_path / "project")
     os.makedirs(project_directory)
+    register_user_facing_session(project_directory, "s")
     for prompt_text in ("first", "second", "third"):
         handle_user_prompt_submit_payload(
             {"cwd": project_directory, "session_id": "s", "prompt": prompt_text}

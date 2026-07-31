@@ -25,6 +25,9 @@ from context_handoff.interfaces.harness_interface import (
 from context_handoff.interfaces.user_interface_control_interface import (
     UserInterfaceControlInterface,
 )
+from context_handoff.user_prompt_log.user_facing_session_registry import (
+    UserFacingSessionRegistry,
+)
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 
 from .handoff_message_composer import compose_handoff_message_for_base_session
@@ -84,6 +87,9 @@ class TurnRotationOrchestrator:
         )
         self._current_branch_session_identifier: Optional[str] = None
         self._branch_ordinal_counter = itertools.count(1)
+        self._user_facing_session_registry = UserFacingSessionRegistry(
+            project_directory
+        )
 
     @property
     def current_branch_session_identifier(self) -> Optional[str]:
@@ -102,6 +108,14 @@ class TurnRotationOrchestrator:
             working_directory=self._project_directory,
             branch_seed_prompt_text=BRANCH_SEED_PROMPT_TEXT,
         )
+        # Registered only now, after the seeding call has finished. The seed
+        # goes through the same non-interactive path a user prompt would, so
+        # registering any earlier would record the orchestrator's own seed text
+        # as something the user said.
+        self._user_facing_session_registry.register_user_facing_session(
+            branch_creation_result.session_identifier
+        )
+
         branch_ordinal = next(self._branch_ordinal_counter)
         branch_command_line_argv = self._harness.build_interactive_resume_command_line(
             session_identifier=branch_creation_result.session_identifier,
