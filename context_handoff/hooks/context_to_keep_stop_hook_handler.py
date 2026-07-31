@@ -1,24 +1,20 @@
 """Stop hook: capture the handoff package the agent emitted this turn.
 
-Runs when the agent finishes a turn. It gathers two facts — the agent's last
-reply, and whether an earlier handoff is still waiting — hands them to a pure
-decision, and carries that decision out.
+The agent's final text comes from the payload. The platform supplies it as
+``last_assistant_message``, which was confirmed against a real session before
+this was written. Taking it from there removes the questions an earlier version
+had to answer badly: which message in the transcript was the right one, and
+whether the transcript had been written yet when the hook ran.
 
-Every run leaves its outcome behind. A live run once captured nothing and there
-was no way to tell whether the agent had emitted no package, emitted a broken
-one, or whether the hook had run at all: all three returned the same empty
-response. The record is what makes those different answers.
-
-The hook still never raises. That rule now applies to a much smaller shell,
-because the branching it used to hide lives in the decision instead.
+Every path leaves a record, including an unexpected failure. The earlier
+version returned silently when it raised, so the one case most in need of a
+trace was the only case that left none — and that is exactly the case that
+happened.
 """
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from context_handoff.adapters.claude_cli.claude_cli_transcript_reader import (
-    read_last_assistant_text_message,
-)
 from context_handoff.context_to_keep.context_to_keep_file_store import (
     ContextToKeepFileStore,
 )
@@ -29,8 +25,8 @@ from .stop_hook_capture_decision import CaptureOutcome, decide_whether_to_captur
 EMPTY_HOOK_RESPONSE: dict[str, Any] = {}
 LAST_STOP_HOOK_OUTCOME_FILE_NAME = "context-handoff-last-stop-hook-outcome.json"
 
-# Enough to show whether the handoff block was present at read time, without
-# copying transcript content into a second file.
+# Enough to show whether the handoff block was present, without copying
+# transcript-sized content into a second file.
 RECORDED_REPLY_TAIL_CHARACTERS = 400
 
 
@@ -47,26 +43,18 @@ def _record_outcome(
     project_directory: str,
     outcome: CaptureOutcome,
     reason_text: str,
-    session_identifier: str,
-    transcript_path: str,
+    hook_payload: dict[str, Any],
     agent_reply_text: Optional[str],
 ) -> None:
-    """Write down what was decided and, just as importantly, what was read.
-
-    The size and tail of the reply are what separate "the agent emitted no
-    package" from "the transcript did not hold the reply yet when this ran".
-    A transcript inspected afterwards cannot tell those apart, because by then
-    the reply is there either way.
-    """
-    reply_text = agent_reply_text or ""
+    reply_text = agent_reply_text if isinstance(agent_reply_text, str) else ""
     ProjectStateDirectory(project_directory).json_document(
         LAST_STOP_HOOK_OUTCOME_FILE_NAME
     ).write_dictionary(
         {
             "outcome": outcome.value,
             "reason_text": reason_text,
-            "session_identifier": session_identifier,
-            "transcript_path": transcript_path,
+            "session_identifier": hook_payload.get("session_id") or "",
+            "transcript_path": hook_payload.get("transcript_path") or "",
             "agent_reply_character_count": len(reply_text),
             "agent_reply_tail": reply_text[-RECORDED_REPLY_TAIL_CHARACTERS:],
         }
@@ -74,20 +62,16 @@ def _record_outcome(
 
 
 def handle_stop_hook_payload(hook_payload: dict[str, Any]) -> dict[str, Any]:
-    """Capture any handoff in the agent's last reply, and record the outcome."""
+    """Capture any handoff in the agent's final message, and record the outcome."""
     project_directory = hook_payload.get("cwd")
     if not project_directory:
         # Nowhere to write anything, including a record of why.
         return EMPTY_HOOK_RESPONSE
 
-    transcript_path = hook_payload.get("transcript_path") or ""
-    session_identifier = hook_payload.get("session_id") or ""
+    agent_reply_text = hook_payload.get("last_assistant_message")
 
     try:
         context_to_keep_store = ContextToKeepFileStore(project_directory)
-        agent_reply_text = (
-            read_last_assistant_text_message(transcript_path) if transcript_path else None
-        )
         decision = decide_whether_to_capture_handoff(
             last_agent_reply_text=agent_reply_text,
             a_handoff_is_already_pending=(
@@ -96,15 +80,17 @@ def handle_stop_hook_payload(hook_payload: dict[str, Any]) -> dict[str, Any]:
         )
         if decision.package is not None:
             context_to_keep_store.write_pending_context_to_keep_package(decision.package)
+        outcome, reason_text = decision.outcome, decision.reason_text
+    except Exception as unexpected_error:
+        outcome = CaptureOutcome.UNEXPECTED_FAILURE
+        reason_text = f"unexpected_failure: {unexpected_error!r}"
+
+    try:
         _record_outcome(
-            project_directory,
-            decision.outcome,
-            decision.reason_text,
-            session_identifier,
-            transcript_path,
-            agent_reply_text,
+            project_directory, outcome, reason_text, hook_payload, agent_reply_text
         )
     except Exception:
-        # Deliberately broad: no failure in this hook may wedge a session.
-        return EMPTY_HOOK_RESPONSE
+        # Recording is best effort. A hook must never wedge a session, and
+        # there is nowhere left to report a failure to report.
+        pass
     return EMPTY_HOOK_RESPONSE

@@ -1,12 +1,13 @@
 """Read agent output back out of a Claude CLI session transcript.
 
-Two questions are answered here, both needed by hooks:
+Used only by the prompt-capture hook, for the two things its payload does not
+carry: what the agent produced during the current turn, so a reply of "yes" is
+still a complete requirement later, and any message the user typed while the
+agent was working.
 
-  * what the agent last said to the user — the Stop hook searches it for the
-    handoff package;
-  * what the agent produced during the current turn — the prompt-capture hook
-    stores it beside the user's words, so a reply of "yes" is still a complete
-    requirement later.
+The Stop hook does not read transcripts. Its payload carries the final
+assistant text directly, so it has no need to work out which message was the
+right one.
 
 The record shapes were taken from a real transcript. Assistant text arrives as
 content blocks of type "text"; thinking and tool_use blocks are not text the
@@ -265,18 +266,6 @@ def find_user_messages_sent_while_agent_was_working(
             continue
         recovered_message_texts.append(queued_message_text)
     return recovered_message_texts
-
-
-def read_last_assistant_text_message(transcript_path: str) -> Optional[str]:
-    """Return the last thing the agent said to the user, or None."""
-    most_recent_assistant_text: Optional[str] = None
-    for record in _iterate_transcript_records(transcript_path):
-        if not _is_main_session_record(record):
-            continue
-        assistant_text = _extract_assistant_text(record)
-        if assistant_text is not None:
-            most_recent_assistant_text = assistant_text
-    return most_recent_assistant_text
 
 
 def read_agent_output_since_last_user_prompt(

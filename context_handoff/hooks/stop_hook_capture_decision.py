@@ -30,6 +30,7 @@ class CaptureOutcome(Enum):
     NO_PACKAGE_IN_REPLY = "no_package_in_reply"
     PACKAGE_PRESENT_BUT_UNUSABLE = "package_present_but_unusable"
     EARLIER_HANDOFF_STILL_PENDING = "earlier_handoff_still_pending"
+    UNEXPECTED_FAILURE = "unexpected_failure"
 
 
 _REASON_TEXT_BY_OUTCOME = {
@@ -47,6 +48,9 @@ _REASON_TEXT_BY_OUTCOME = {
     CaptureOutcome.EARLIER_HANDOFF_STILL_PENDING: (
         "earlier_handoff_still_pending: a previous handoff has not been consumed "
         "yet and must not be overwritten"
+    ),
+    CaptureOutcome.UNEXPECTED_FAILURE: (
+        "unexpected_failure: the hook raised before it could reach a decision"
     ),
 }
 

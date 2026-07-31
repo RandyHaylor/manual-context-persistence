@@ -11,7 +11,6 @@ import json
 
 from context_handoff.adapters.claude_cli.claude_cli_transcript_reader import (
     read_agent_output_since_last_user_prompt,
-    read_last_assistant_text_message,
 )
 
 
@@ -70,79 +69,6 @@ def user_tool_result_record(result_text: str) -> dict:
             "content": [{"type": "tool_result", "content": result_text}],
         },
     }
-
-
-def test_an_empty_transcript_has_no_last_assistant_message(tmp_path) -> None:
-    assert read_last_assistant_text_message(write_transcript(tmp_path, [])) is None
-
-
-def test_a_missing_transcript_has_no_last_assistant_message(tmp_path) -> None:
-    assert read_last_assistant_text_message(str(tmp_path / "absent.jsonl")) is None
-
-
-def test_the_last_assistant_text_message_is_returned(tmp_path) -> None:
-    transcript_path = write_transcript(
-        tmp_path,
-        [
-            assistant_text_record("earlier reply"),
-            user_prompt_record("next question"),
-            assistant_text_record("latest reply"),
-        ],
-    )
-    assert read_last_assistant_text_message(transcript_path) == "latest reply"
-
-
-def test_text_blocks_within_one_message_are_joined(tmp_path) -> None:
-    transcript_path = write_transcript(
-        tmp_path,
-        [
-            {
-                "type": "assistant",
-                "isSidechain": False,
-                "message": {
-                    "role": "assistant",
-                    "content": [
-                        {"type": "text", "text": "first part "},
-                        {"type": "text", "text": "second part"},
-                    ],
-                },
-            }
-        ],
-    )
-    assert read_last_assistant_text_message(transcript_path) == "first part second part"
-
-
-def test_tool_use_and_thinking_records_are_not_mistaken_for_a_reply(tmp_path) -> None:
-    """The Stop hook needs the text the agent showed the user, nothing else."""
-    transcript_path = write_transcript(
-        tmp_path,
-        [
-            assistant_text_record("the real reply"),
-            assistant_thinking_record("private reasoning"),
-            assistant_tool_use_record("Bash"),
-        ],
-    )
-    assert read_last_assistant_text_message(transcript_path) == "the real reply"
-
-
-def test_subagent_replies_are_ignored(tmp_path) -> None:
-    """A sidechain is a subagent's conversation, not this session's."""
-    transcript_path = write_transcript(
-        tmp_path,
-        [
-            assistant_text_record("main session reply"),
-            assistant_text_record("subagent reply", is_sidechain=True),
-        ],
-    )
-    assert read_last_assistant_text_message(transcript_path) == "main session reply"
-
-
-def test_unparsable_lines_are_skipped(tmp_path) -> None:
-    transcript_path = str(tmp_path / "transcript.jsonl")
-    with open(transcript_path, "w", encoding="utf-8") as transcript_file:
-        transcript_file.write('{"type":"assistant", TRUNCATED\n')
-        transcript_file.write(json.dumps(assistant_text_record("survived")) + "\n")
-    assert read_last_assistant_text_message(transcript_path) == "survived"
 
 
 def test_agent_output_since_the_last_user_prompt_excludes_earlier_turns(

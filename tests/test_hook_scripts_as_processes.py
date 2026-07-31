@@ -91,36 +91,20 @@ def test_stop_hook_script_writes_the_package_end_to_end(tmp_path) -> None:
             "context_to_carry_forward": [],
         }
     )
-    transcript_path = str(tmp_path / "transcript.jsonl")
-    with open(transcript_path, "w", encoding="utf-8") as transcript_file:
-        transcript_file.write(
-            json.dumps(
-                {
-                    "type": "assistant",
-                    "isSidechain": False,
-                    "message": {
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": f"```{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}\n"
-                                f"{package_json}\n```",
-                            }
-                        ],
-                    },
-                }
-            )
-            + "\n"
-        )
-
+    # The payload shape the platform actually sends, confirmed against a real
+    # session: the final assistant text arrives in last_assistant_message.
     completed = run_hook_script(
         STOP_HOOK_SCRIPT_PATH,
         json.dumps(
             {
                 "cwd": project_directory,
                 "session_id": "branch-session",
-                "transcript_path": transcript_path,
+                "transcript_path": str(tmp_path / "transcript.jsonl"),
                 "hook_event_name": "Stop",
+                "last_assistant_message": (
+                    f"prose\n\n```{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}\n"
+                    f"{package_json}\n```"
+                ),
             }
         ),
     )
