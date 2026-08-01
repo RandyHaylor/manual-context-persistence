@@ -222,7 +222,7 @@ class TurnRotationOrchestrator:
         # named rather than being told to ask for instructions. The package is
         # still held here, so retiring the file above does not lose the task.
         new_branch_session_identifier = self._launch_new_branch_session_in_shared_window(
-            self._build_rotated_branch_session_preamble_text(pending_package.next_task)
+            self._build_rotated_branch_session_preamble_text(pending_package.next_action)
         )
 
         return TurnRotationOutcome(

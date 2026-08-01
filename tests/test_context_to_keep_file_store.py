@@ -35,7 +35,7 @@ def build_store_with_scripted_timestamps(
 
 def build_package(summary_text: str = "did the thing") -> ContextToKeepPackage:
     return ContextToKeepPackage(
-        next_task="Ask the user which pad naming should win.", context_to_keep=[summary_text]
+        next_action="Ask the user which pad naming should win.", context_to_keep=[summary_text]
     )
 
 

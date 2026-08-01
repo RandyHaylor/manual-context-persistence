@@ -27,7 +27,7 @@ def build_reply_containing_a_package(summary_text: str = "Did the thing.") -> st
     package_json = json.dumps(
         {
             "context_to_keep_version": CONTEXT_TO_KEEP_PACKAGE_VERSION,
-            "next_task": "Ask the user which pad naming should win.",
+            "next_action": "Ask the user which pad naming should win.",
             "context_to_keep": [summary_text],
         }
     )

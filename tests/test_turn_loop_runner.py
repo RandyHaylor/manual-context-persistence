@@ -47,7 +47,7 @@ class LoopTestHarness:
     def stage_pending_handoff(self) -> None:
         self.context_to_keep_store.write_pending_context_to_keep_package(
             ContextToKeepPackage(
-                next_task="Ask the user which pad naming should win.",
+                next_action="Ask the user which pad naming should win.",
                 context_to_keep=["A turn happened."],
             )
         )

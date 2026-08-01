@@ -32,7 +32,7 @@ from context_handoff.context_to_keep.context_to_keep_package import (
     CONTEXT_TO_KEEP_FIELD_NAME,
     CONTEXT_TO_KEEP_PACKAGE_VERSION,
     CONTEXT_TO_KEEP_VERSION_FIELD_NAME,
-    NEXT_TASK_FIELD_NAME,
+    NEXT_ACTION_FIELD_NAME,
 )
 
 # An example entry rather than a placeholder: a constraint someone would
@@ -42,9 +42,9 @@ EXAMPLE_CONTEXT_TO_KEEP_ENTRY_TEXT = (
     "do not change them unprompted"
 )
 
-# A question rather than more work, so the example does not suggest the next task
+# A question rather than more work, so the example does not suggest the next action
 # always has to be another unit of building.
-EXAMPLE_NEXT_TASK_TEXT = (
+EXAMPLE_NEXT_ACTION_TEXT = (
     "Ask the user whether the aria-label naming should be made consistent."
 )
 
@@ -63,7 +63,7 @@ REQUEST_INSTRUCTIONS_SENTENCE = "Request instructions from the user."
 # Every seed opens with what to do, then how to report it. For the first session
 # that is the sentence above; afterwards it is the task the previous session
 # named, introduced by the field's own name so the two cannot drift apart.
-NEXT_TASK_LABEL_TEXT = f"{NEXT_TASK_FIELD_NAME}:"
+NEXT_ACTION_LABEL_TEXT = f"{NEXT_ACTION_FIELD_NAME}:"
 
 
 def build_branch_session_preamble_text(require_git_commit: bool = False) -> str:
@@ -89,7 +89,7 @@ def build_branch_session_preamble_text(require_git_commit: bool = False) -> str:
         "about the deliverable from the last assigned task that give the "
         "information necessary to understand the work or receive the final "
         "concluding reply. Leave out anything recoverable by reading the files.\n"
-        f"- `{NEXT_TASK_FIELD_NAME}` (string): the next action to take — work, "
+        f"- `{NEXT_ACTION_FIELD_NAME}` (string): the next action to take — work, "
         "research, asking the user a question, reporting results.\n\n"
         "Example:\n\n"
         f"```{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}\n"
@@ -99,7 +99,7 @@ def build_branch_session_preamble_text(require_git_commit: bool = False) -> str:
         f'  "{CONTEXT_TO_KEEP_FIELD_NAME}": [\n'
         f'    "{EXAMPLE_CONTEXT_TO_KEEP_ENTRY_TEXT}"\n'
         "  ],\n"
-        f'  "{NEXT_TASK_FIELD_NAME}": "{EXAMPLE_NEXT_TASK_TEXT}"\n'
+        f'  "{NEXT_ACTION_FIELD_NAME}": "{EXAMPLE_NEXT_ACTION_TEXT}"\n'
         "}\n"
         "```"
     )
@@ -118,7 +118,7 @@ def build_first_branch_session_preamble_text(require_git_commit: bool = False) -
 
 
 def build_rotated_branch_session_preamble_text(
-    next_task_text: str, require_git_commit: bool = False
+    next_action_text: str, require_git_commit: bool = False
 ) -> str:
     """The text a session opened after a completed turn is seeded with.
 
@@ -127,7 +127,7 @@ def build_rotated_branch_session_preamble_text(
     everything that was done and no statement of what to do about it.
     """
     return (
-        f"{NEXT_TASK_LABEL_TEXT} {next_task_text}\n\n"
+        f"{NEXT_ACTION_LABEL_TEXT} {next_action_text}\n\n"
         f"{build_branch_session_preamble_text(require_git_commit=require_git_commit)}"
     )
 

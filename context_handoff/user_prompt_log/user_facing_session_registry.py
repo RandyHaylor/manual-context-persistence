@@ -13,7 +13,7 @@ false for as long as the orchestrator is still seeding it.
 
 They used to be answered by a single membership check, with the branch registered
 only after its seeding call returned. That worked while the seed was an output
-contract the session merely acknowledged. Once the seed carried the next task, the
+contract the session merely acknowledged. Once the seed carried the next action, the
 session's first act became the work itself — and its handoff was discarded,
 because the session it came from had not been written down yet.
 

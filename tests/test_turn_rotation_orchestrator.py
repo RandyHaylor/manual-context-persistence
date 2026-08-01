@@ -64,7 +64,7 @@ class OrchestratorTestHarness:
         self,
         branch_session_identifier: str,
         user_prompt_text: str = "do the thing",
-        next_task_text: str = "Ask the user which pad naming should win.",
+        next_action_text: str = "Ask the user which pad naming should win.",
     ) -> None:
         """Simulate what a finished branch turn leaves behind on disk."""
         self.user_prompt_log_store.append_user_prompt_entry(
@@ -72,7 +72,7 @@ class OrchestratorTestHarness:
         )
         self.context_to_keep_store.write_pending_context_to_keep_package(
             ContextToKeepPackage(
-                next_task=next_task_text,
+                next_action=next_action_text,
                 context_to_keep=["A fact worth keeping."],
             )
         )
@@ -231,7 +231,7 @@ def test_only_the_first_session_is_seeded_with_the_request_for_instructions(
     )
 
 
-def test_the_next_task_named_by_one_session_seeds_the_session_that_follows(
+def test_the_next_action_named_by_one_session_seeds_the_session_that_follows(
     test_harness,
 ) -> None:
     """The whole point of the field, checked where it actually has to survive.
@@ -240,12 +240,12 @@ def test_the_next_task_named_by_one_session_seeds_the_session_that_follows(
     this proves the task is still in hand at launch rather than read back from a
     file that has already moved.
     """
-    distinctive_next_task_text = "Report the WOMBAT-8842 findings to the user."
+    distinctive_next_action_text = "Report the WOMBAT-8842 findings to the user."
     first_branch_session_identifier = (
         test_harness.orchestrator.start_first_branch_session()
     )
     test_harness.stage_completed_turn(
-        first_branch_session_identifier, next_task_text=distinctive_next_task_text
+        first_branch_session_identifier, next_action_text=distinctive_next_action_text
     )
 
     rotation_outcome = test_harness.orchestrator.rotate_to_next_branch_session()
@@ -255,21 +255,21 @@ def test_the_next_task_named_by_one_session_seeds_the_session_that_follows(
             rotation_outcome.new_branch_session_identifier
         ][0]
     )
-    assert distinctive_next_task_text in seed_given_to_the_new_session
+    assert distinctive_next_action_text in seed_given_to_the_new_session
 
 
-def test_the_next_task_is_not_sent_to_the_accumulating_session(test_harness) -> None:
+def test_the_next_action_is_not_sent_to_the_accumulating_session(test_harness) -> None:
     """It is passed from one working session to the next, and nowhere else.
 
     The session that accumulates history has no user turn to act on, so an
     instruction there has nothing to do and would only add to what it carries.
     """
-    distinctive_next_task_text = "Report the WOMBAT-8842 findings to the user."
+    distinctive_next_action_text = "Report the WOMBAT-8842 findings to the user."
     first_branch_session_identifier = (
         test_harness.orchestrator.start_first_branch_session()
     )
     test_harness.stage_completed_turn(
-        first_branch_session_identifier, next_task_text=distinctive_next_task_text
+        first_branch_session_identifier, next_action_text=distinctive_next_action_text
     )
 
     test_harness.orchestrator.rotate_to_next_branch_session()
@@ -280,7 +280,7 @@ def test_the_next_task_is_not_sent_to_the_accumulating_session(test_harness) -> 
         ]
     )
     for submitted_text in texts_sent_to_the_accumulating_session:
-        assert distinctive_next_task_text not in submitted_text
+        assert distinctive_next_action_text not in submitted_text
 
 
 def test_every_session_is_seeded_with_the_output_contract(test_harness) -> None:

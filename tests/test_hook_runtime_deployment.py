@@ -108,7 +108,7 @@ def test_a_deployed_stop_hook_captures_a_package_as_a_real_process(tmp_path) -> 
         {
             "context_to_keep_version": CONTEXT_TO_KEEP_PACKAGE_VERSION,
             "context_to_keep": ["The codeword is WOMBAT-8842."],
-            "next_task": "Tell the user the codeword.",
+            "next_action": "Tell the user the codeword.",
         }
     )
 
@@ -144,7 +144,7 @@ def test_a_deployed_stop_hook_captures_a_package_as_a_real_process(tmp_path) -> 
         project_directory
     ).read_pending_context_to_keep_package()
     assert captured_package is not None, completed_process.stderr
-    assert captured_package.next_task == "Tell the user the codeword."
+    assert captured_package.next_action == "Tell the user the codeword."
 
 
 @pytest.mark.parametrize(

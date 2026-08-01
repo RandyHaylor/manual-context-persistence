@@ -19,7 +19,7 @@ from context_handoff.context_to_keep.context_to_keep_package import (
     CONTEXT_TO_KEEP_FIELD_NAME,
     CONTEXT_TO_KEEP_PACKAGE_VERSION,
     CONTEXT_TO_KEEP_VERSION_FIELD_NAME,
-    NEXT_TASK_FIELD_NAME,
+    NEXT_ACTION_FIELD_NAME,
     extract_context_to_keep_package_from_agent_response,
 )
 from context_handoff.orchestration.branch_session_preamble import (
@@ -51,7 +51,7 @@ def test_the_example_block_matches_the_shape_the_parser_expects() -> None:
     assert set(example) == {
         CONTEXT_TO_KEEP_VERSION_FIELD_NAME,
         CONTEXT_TO_KEEP_FIELD_NAME,
-        NEXT_TASK_FIELD_NAME,
+        NEXT_ACTION_FIELD_NAME,
     }
     assert example[CONTEXT_TO_KEEP_VERSION_FIELD_NAME] == CONTEXT_TO_KEEP_PACKAGE_VERSION
 
@@ -199,23 +199,23 @@ def test_the_commit_is_asked_for_before_the_block_is_emitted() -> None:
     )
 
 
-def test_the_contract_requires_a_next_task_and_says_what_counts_as_one() -> None:
-    """Anything is a valid next task, so the field list has to say so.
+def test_the_contract_requires_a_next_action_and_says_what_counts_as_one() -> None:
+    """Anything is a valid next action, so the field list has to say so.
 
     Without the examples it reads as "the next unit of building", and a session
     whose honest next step is a question has nothing valid to write.
     """
     guidance = guidance_before_the_example(BRANCH_SESSION_PREAMBLE_TEXT)
-    assert f"`{NEXT_TASK_FIELD_NAME}` (string)" in guidance
+    assert f"`{NEXT_ACTION_FIELD_NAME}` (string)" in guidance
     lowercased = guidance.lower()
     assert "the next action to take" in lowercased
     assert "asking the user a question" in lowercased
     assert "reporting results" in lowercased
 
 
-def test_the_example_names_a_next_task_that_is_not_more_building() -> None:
+def test_the_example_names_a_next_action_that_is_not_more_building() -> None:
     example = read_example_block(BRANCH_SESSION_PREAMBLE_TEXT)
-    assert example[NEXT_TASK_FIELD_NAME].strip()
+    assert example[NEXT_ACTION_FIELD_NAME].strip()
 
 
 def test_a_rotated_session_is_seeded_with_the_task_it_was_given() -> None:

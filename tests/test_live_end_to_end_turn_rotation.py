@@ -116,7 +116,7 @@ class LiveTurnLoopFixture:
         )
         self.context_to_keep_store.write_pending_context_to_keep_package(
             ContextToKeepPackage(
-                next_task="Tell the user the project codeword.",
+                next_action="Tell the user the project codeword.",
                 context_to_keep=["The project codeword is WOMBAT-8842."],
             )
         )

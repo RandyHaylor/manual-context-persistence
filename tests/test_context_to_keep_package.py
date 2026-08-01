@@ -32,7 +32,7 @@ def build_valid_package_dictionary(**overrides) -> dict:
     package_dictionary = {
         "context_to_keep_version": CONTEXT_TO_KEEP_PACKAGE_VERSION,
         "context_to_keep": ["Pads are addressed by colour, not position."],
-        "next_task": "Ask the user which pad naming should win.",
+        "next_action": "Ask the user which pad naming should win.",
     }
     package_dictionary.update(overrides)
     return package_dictionary
@@ -67,46 +67,46 @@ def test_a_missing_context_field_is_rejected() -> None:
         parse_context_to_keep_package(package_dictionary)
 
 
-def test_the_next_task_parses_and_is_stripped() -> None:
+def test_the_next_action_parses_and_is_stripped() -> None:
     package = parse_context_to_keep_package(
-        build_valid_package_dictionary(next_task="  Report the results.  ")
+        build_valid_package_dictionary(next_action="  Report the results.  ")
     )
-    assert package.next_task == "Report the results."
+    assert package.next_action == "Report the results."
 
 
-def test_a_missing_next_task_is_rejected() -> None:
+def test_a_missing_next_action_is_rejected() -> None:
     """The next session is opened to carry it out, so a package without one
     leaves that session with nothing to act on."""
     package_dictionary = build_valid_package_dictionary()
-    del package_dictionary["next_task"]
+    del package_dictionary["next_action"]
     with pytest.raises(InvalidContextToKeepPackageError):
         parse_context_to_keep_package(package_dictionary)
 
 
-def test_a_blank_next_task_is_rejected() -> None:
+def test_a_blank_next_action_is_rejected() -> None:
     """Present but empty is the same as absent for the session that receives it."""
     for blank_value in ("", "   ", "\n\t"):
         with pytest.raises(InvalidContextToKeepPackageError):
             parse_context_to_keep_package(
-                build_valid_package_dictionary(next_task=blank_value)
+                build_valid_package_dictionary(next_action=blank_value)
             )
 
 
-def test_a_next_task_that_is_not_a_string_is_rejected() -> None:
+def test_a_next_action_that_is_not_a_string_is_rejected() -> None:
     for wrong_typed_value in (["a list"], {"a": "dict"}, 7, None, True):
         with pytest.raises(InvalidContextToKeepPackageError):
             parse_context_to_keep_package(
-                build_valid_package_dictionary(next_task=wrong_typed_value)
+                build_valid_package_dictionary(next_action=wrong_typed_value)
             )
 
 
-def test_the_next_task_survives_a_round_trip_through_json() -> None:
+def test_the_next_action_survives_a_round_trip_through_json() -> None:
     """What the store writes has to be what the next rotation can read back."""
     original_package = parse_context_to_keep_package(build_valid_package_dictionary())
     reparsed_package = parse_context_to_keep_package(
         original_package.to_json_dictionary()
     )
-    assert reparsed_package.next_task == original_package.next_task
+    assert reparsed_package.next_action == original_package.next_action
 
 
 def test_an_unknown_version_is_rejected() -> None:

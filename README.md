@@ -115,7 +115,7 @@ Stop hook finds it and writes it to
 {
   "context_to_keep_version": 1,
   "context_to_keep": ["A fact the next turn needs."],
-  "next_task": "Ask the user whether the naming should be made consistent."
+  "next_action": "Ask the user whether the naming should be made consistent."
 }
 ```
 ````
@@ -124,7 +124,7 @@ Emission is triggered by having done work worth saving, not by a turn ending: a
 question or an acknowledgement would otherwise cost a full rotation to carry
 nothing.
 
-`next_task` is the next action to take — work, research, asking the user a
+`next_action` is the next action to take — work, research, asking the user a
 question, reporting results. It is what makes the loop continue rather than
 restart: the session opened after a rotation is seeded with the task the previous
 one named, then the same output contract. It is passed from one working session to
