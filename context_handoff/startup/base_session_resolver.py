@@ -13,9 +13,12 @@ from typing import Optional
 
 from context_handoff.interfaces.harness_interface import HarnessInterface
 
+# The closing sentence exists because of what the seed itself is: a message,
+# which the session answers. Without it the session treats the seed as a request
+# it cannot find, and replies asking what the user wants.
 BASE_SESSION_PREAMBLE_TEXT = (
     "You'll receive a history of user messages and agent work notes. "
-    "Factor these in when you work."
+    "Factor these in when you work. Stand by to receive."
 )
 
 

@@ -1,8 +1,13 @@
 """The handoff package an agent returns at the end of a turn.
 
-The spec describes one thing: the context the agent returns that it decides is
-all that is needed going forward to understand what was done. So the package is
-that context and nothing else.
+Two things travel in it. The context the agent decides is needed going forward to
+understand what was done, and the next task — the action the following session is
+opened to carry out.
+
+The next task is what makes the loop continue rather than restart. It is passed
+from the session that named it to the session that follows, and it is not sent to
+the session that accumulates the project's history: that one has no user turn to
+act on and nothing to do with an instruction.
 
 An earlier version also carried a summary field. It was invented here, not
 taken from the spec, and across a twenty-turn run it was where narrative
@@ -26,6 +31,7 @@ CONTEXT_TO_KEEP_PACKAGE_VERSION = 1
 CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG = "context-to-keep"
 CONTEXT_TO_KEEP_FIELD_NAME = "context_to_keep"
 CONTEXT_TO_KEEP_VERSION_FIELD_NAME = "context_to_keep_version"
+NEXT_TASK_FIELD_NAME = "next_task"
 
 _FENCED_CONTEXT_TO_KEEP_BLOCK_PATTERN = re.compile(
     r"```" + re.escape(CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG) + r"\s*\n(.*?)```",
@@ -39,12 +45,16 @@ class InvalidContextToKeepPackageError(ValueError):
 
 @dataclass(frozen=True)
 class ContextToKeepPackage:
+    # No default: a package without a next task cannot be handed on, so the type
+    # should not be constructible without one.
+    next_task: str
     context_to_keep: list[str] = field(default_factory=list)
 
     def to_json_dictionary(self) -> dict[str, Any]:
         return {
             CONTEXT_TO_KEEP_VERSION_FIELD_NAME: CONTEXT_TO_KEEP_PACKAGE_VERSION,
             CONTEXT_TO_KEEP_FIELD_NAME: list(self.context_to_keep),
+            NEXT_TASK_FIELD_NAME: self.next_task,
         }
 
 
@@ -80,10 +90,23 @@ def parse_context_to_keep_package(
             f"{CONTEXT_TO_KEEP_FIELD_NAME} must be a list of strings"
         )
 
+    # The next task is what the following session is opened to do, so a package
+    # without one leaves that session with nothing to act on.
+    if NEXT_TASK_FIELD_NAME not in candidate_package_dictionary:
+        raise InvalidContextToKeepPackageError(
+            f"{NEXT_TASK_FIELD_NAME} is required; the next session is opened to do it"
+        )
+    next_task = candidate_package_dictionary[NEXT_TASK_FIELD_NAME]
+    if not isinstance(next_task, str) or not next_task.strip():
+        raise InvalidContextToKeepPackageError(
+            f"{NEXT_TASK_FIELD_NAME} must be a non-empty string"
+        )
+
     # A blank item carries nothing and would occupy a line in the base session
     # for the life of the project.
     return ContextToKeepPackage(
-        context_to_keep=[item.strip() for item in context_items if item.strip()]
+        next_task=next_task.strip(),
+        context_to_keep=[item.strip() for item in context_items if item.strip()],
     )
 
 

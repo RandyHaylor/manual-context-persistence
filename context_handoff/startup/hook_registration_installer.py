@@ -22,20 +22,12 @@ from typing import Any
 
 from context_handoff.project_state.project_state_directory import ProjectStateDirectory
 from context_handoff.startup.hook_registration_preflight import (
+    HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME,
     PROJECT_SETTINGS_FILE_NAME,
-    STOP_HOOK_EVENT_NAME,
-    STOP_HOOK_SCRIPT_FILE_NAME,
-    USER_PROMPT_SUBMIT_HOOK_EVENT_NAME,
-    USER_PROMPT_SUBMIT_HOOK_SCRIPT_FILE_NAME,
 )
 
 HOOKS_SECTION_FIELD_NAME = "hooks"
 HOOK_COMMAND_TYPE_NAME = "command"
-
-HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME = {
-    STOP_HOOK_EVENT_NAME: STOP_HOOK_SCRIPT_FILE_NAME,
-    USER_PROMPT_SUBMIT_HOOK_EVENT_NAME: USER_PROMPT_SUBMIT_HOOK_SCRIPT_FILE_NAME,
-}
 
 
 @dataclass(frozen=True)

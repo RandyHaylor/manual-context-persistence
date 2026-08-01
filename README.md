@@ -114,7 +114,8 @@ Stop hook finds it and writes it to
 ```context-to-keep
 {
   "context_to_keep_version": 1,
-  "context_to_keep": ["A fact the next turn needs."]
+  "context_to_keep": ["A fact the next turn needs."],
+  "next_task": "Ask the user whether the naming should be made consistent."
 }
 ```
 ````
@@ -122,6 +123,16 @@ Stop hook finds it and writes it to
 Emission is triggered by having done work worth saving, not by a turn ending: a
 question or an acknowledgement would otherwise cost a full rotation to carry
 nothing.
+
+`next_task` is the next action to take — work, research, asking the user a
+question, reporting results. It is what makes the loop continue rather than
+restart: the session opened after a rotation is seeded with the task the previous
+one named, then the same output contract. It is passed from one working session to
+the next and is never sent to the base session, which has no user turn to act on.
+
+The first session of a run is the only one with no task to inherit, so it is told
+to ask the user for instructions instead. Every seed opens with what to do, then
+how to report it.
 
 The last valid block in a reply wins, so an agent may quote the format before
 emitting the real thing. A malformed package is ignored rather than raising —

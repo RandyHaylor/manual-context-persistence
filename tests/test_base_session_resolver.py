@@ -62,6 +62,17 @@ def test_the_preamble_says_what_will_arrive_and_what_to_do_with_it() -> None:
     assert "factor these in" in lowercased
 
 
+def test_the_preamble_tells_the_session_that_nothing_is_being_asked_yet() -> None:
+    """Found in a real run, so it is pinned rather than left to be tidied away.
+
+    The seed is delivered as a message, and the session answers it. With no
+    closing sentence it went looking for a request, found none, and replied
+    asking what the user wanted — which is the seed turn producing a reply to
+    nobody.
+    """
+    assert "Stand by to receive." in BASE_SESSION_PREAMBLE_TEXT
+
+
 def test_the_preamble_does_not_carry_the_block_instruction() -> None:
     """Branches emit the block, so branches are told about it, not everyone."""
     assert "context_to_keep" not in BASE_SESSION_PREAMBLE_TEXT

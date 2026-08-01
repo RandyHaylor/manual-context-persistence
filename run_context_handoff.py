@@ -98,12 +98,10 @@ def main(argv: list[str]) -> int:
             ),
             shared_window_identifier=arguments.shared_window_identifier,
             require_git_commit_override=arguments.require_git_commit_override,
-            # Read from here, deployed to a fixed path under the user's home,
-            # and referenced there — so a project's settings file does not point
-            # into this repository and break if it moves.
-            hook_scripts_source_directory=os.path.join(
-                REPOSITORY_ROOT_DIRECTORY, "hooks"
-            ),
+            # The hook runtime is read from here, deployed to a fixed path under
+            # the user's home, and referenced there — so a project's settings file
+            # does not point into this repository and break if it moves.
+            repository_root_directory=REPOSITORY_ROOT_DIRECTORY,
         ),
         harness=ClaudeCliHarnessAdapter(
             process_launcher=SubprocessNonInteractiveProcessLauncher(),

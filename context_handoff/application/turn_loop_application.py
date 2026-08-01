@@ -10,6 +10,7 @@ whole sequence runs in a test with no Claude CLI, no tmux, and no terminal.
 """
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -21,7 +22,8 @@ from context_handoff.interfaces.user_interface_control_interface import (
     UserInterfaceControlInterface,
 )
 from context_handoff.orchestration.branch_session_preamble import (
-    build_branch_session_preamble_text,
+    build_first_branch_session_preamble_text,
+    build_rotated_branch_session_preamble_text,
 )
 from context_handoff.orchestration.turn_rotation_orchestrator import (
     TurnRotationOrchestrator,
@@ -45,8 +47,8 @@ from context_handoff.startup.hook_registration_preflight import (
     build_project_settings_path,
     inspect_hook_registration_for_project,
 )
-from context_handoff.startup.hook_script_deployment import (
-    deploy_hook_scripts_overwriting_existing,
+from context_handoff.startup.hook_runtime_deployment import (
+    deploy_hook_runtime_overwriting_existing,
 )
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 
@@ -62,14 +64,15 @@ class TurnLoopApplicationRequest:
     """What the operator asked for, independent of how they asked."""
 
     project_directory: str
-    # Where the scripts are read from, which is this repository. They are copied
-    # to one fixed place under the user's home before being referenced, so a
-    # project's settings file never points into the repository itself.
-    hook_scripts_source_directory: str
+    # Where the hook runtime is read from, which is this repository: both the
+    # scripts and the package they import are copied to one fixed place under the
+    # user's home before being referenced, so a project's settings file never
+    # points into the repository itself.
+    repository_root_directory: str
     base_session_identifier_to_resume: Optional[str] = None
     # Injectable so a test deploys into a temporary directory rather than into
     # the developer's own home.
-    deployed_hook_scripts_directory: Optional[str] = None
+    deployed_runtime_directory: Optional[str] = None
     create_new_base_session_without_asking: bool = False
     shared_window_identifier: Optional[str] = None
     # None means the operator did not pass the flag, which is not the same as
@@ -125,12 +128,13 @@ def prepare_project_state_and_hooks(
         write_line(f"settings: {settings_store.settings_file_path}")
 
     # Before anything looks at or writes a command naming these scripts, make
-    # sure the scripts at that path are the ones this repository currently holds.
-    deployment_result = deploy_hook_scripts_overwriting_existing(
-        hook_scripts_source_directory=request.hook_scripts_source_directory,
-        deployed_hook_scripts_directory=request.deployed_hook_scripts_directory,
+    # sure what sits at that path is the runtime this repository currently holds —
+    # the scripts and the package they import, or they die before any handler runs.
+    deployment_result = deploy_hook_runtime_overwriting_existing(
+        repository_root_directory=request.repository_root_directory,
+        deployed_runtime_directory=request.deployed_runtime_directory,
     )
-    write_line(f"hook scripts: {deployment_result.detail_text}")
+    write_line(f"hook runtime: {deployment_result.detail_text}")
 
     hook_report = inspect_hook_registration_for_project(request.project_directory)
     if hook_report.is_ready_to_run:
@@ -243,8 +247,14 @@ def run_turn_loop_application(
         project_directory=request.project_directory,
         base_session_identifier=resolved_base_session.session_identifier,
         shared_window_identifier=shared_window_identifier,
-        branch_session_preamble_text=build_branch_session_preamble_text(
+        first_branch_session_preamble_text=build_first_branch_session_preamble_text(
             require_git_commit=effective_settings.require_git_commit
+        ),
+        # A partial rather than a finished string: the rotation text depends on
+        # the task the session being replaced named, which is not known yet.
+        build_rotated_branch_session_preamble_text=functools.partial(
+            build_rotated_branch_session_preamble_text,
+            require_git_commit=effective_settings.require_git_commit,
         ),
     )
 

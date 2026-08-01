@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from context_handoff.context_to_keep.context_to_keep_file_store import (
     ContextToKeepFileStore,
@@ -30,7 +30,10 @@ from context_handoff.user_prompt_log.user_facing_session_registry import (
 )
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 
-from .branch_session_preamble import BRANCH_SESSION_PREAMBLE_TEXT
+from .branch_session_preamble import (
+    FIRST_BRANCH_SESSION_PREAMBLE_TEXT,
+    build_rotated_branch_session_preamble_text,
+)
 from .handoff_message_composer import compose_handoff_message_for_base_session
 
 # One interrupt cancels the agent's current turn; a second exits the session.
@@ -72,7 +75,10 @@ class TurnRotationOrchestrator:
         base_session_acknowledgment_timeout_seconds: float = (
             DEFAULT_BASE_SESSION_ACKNOWLEDGMENT_TIMEOUT_SECONDS
         ),
-        branch_session_preamble_text: str = BRANCH_SESSION_PREAMBLE_TEXT,
+        first_branch_session_preamble_text: str = FIRST_BRANCH_SESSION_PREAMBLE_TEXT,
+        build_rotated_branch_session_preamble_text: Callable[[str], str] = (
+            build_rotated_branch_session_preamble_text
+        ),
     ) -> None:
         self._harness = harness
         self._user_interface_control = user_interface_control
@@ -86,7 +92,18 @@ class TurnRotationOrchestrator:
         )
         # Injected rather than read here: whether a commit is required is a
         # settings decision, and orchestration only needs the finished text.
-        self._branch_session_preamble_text = branch_session_preamble_text
+        #
+        # Two of them, because the first session of a run is the only one opened
+        # before the user has said anything. Every later one is opened because
+        # they spoke and work was done, so it must not ask for instructions.
+        #
+        # The rotation one is a builder rather than a string: its text depends on
+        # the task named by the session being replaced, so it cannot be settled
+        # until the rotation happens.
+        self._first_branch_session_preamble_text = first_branch_session_preamble_text
+        self._build_rotated_branch_session_preamble_text = (
+            build_rotated_branch_session_preamble_text
+        )
         self._current_branch_session_identifier: Optional[str] = None
         self._branch_ordinal_counter = itertools.count(1)
         self._user_facing_session_registry = UserFacingSessionRegistry(
@@ -104,11 +121,13 @@ class TurnRotationOrchestrator:
     def has_pending_handoff(self) -> bool:
         return self._context_to_keep_store.has_pending_context_to_keep()
 
-    def _launch_new_branch_session_in_shared_window(self) -> str:
+    def _launch_new_branch_session_in_shared_window(
+        self, branch_seed_prompt_text: str
+    ) -> str:
         branch_creation_result = self._harness.create_branch_session_from_base_session(
             base_session_identifier=self._base_session_identifier,
             working_directory=self._project_directory,
-            branch_seed_prompt_text=self._branch_session_preamble_text,
+            branch_seed_prompt_text=branch_seed_prompt_text,
         )
         # Registered only now, after the seeding call has finished. The seed
         # goes through the same non-interactive path a user prompt would, so
@@ -136,7 +155,9 @@ class TurnRotationOrchestrator:
         self._user_interface_control.open_shared_window(
             self._shared_window_identifier, self._project_directory
         )
-        return self._launch_new_branch_session_in_shared_window()
+        return self._launch_new_branch_session_in_shared_window(
+            self._first_branch_session_preamble_text
+        )
 
     def rotate_to_next_branch_session(self) -> TurnRotationOutcome:
         """Perform one full rotation: interrupt, hand off, relaunch.
@@ -192,7 +213,13 @@ class TurnRotationOrchestrator:
             self._context_to_keep_store.rotate_pending_context_to_keep_into_history()
         )
 
-        new_branch_session_identifier = self._launch_new_branch_session_in_shared_window()
+        # The rotation text, not the first-session text: the user has spoken and
+        # work has been done, so this session is given the task the previous one
+        # named rather than being told to ask for instructions. The package is
+        # still held here, so retiring the file above does not lose the task.
+        new_branch_session_identifier = self._launch_new_branch_session_in_shared_window(
+            self._build_rotated_branch_session_preamble_text(pending_package.next_task)
+        )
 
         return TurnRotationOutcome(
             new_branch_session_identifier=new_branch_session_identifier,

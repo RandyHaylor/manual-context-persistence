@@ -19,10 +19,13 @@ from context_handoff.startup.hook_registration_installer import (
     install_context_handoff_hooks_into_project_settings,
 )
 from context_handoff.startup.hook_registration_preflight import (
+    HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME,
     STOP_HOOK_SCRIPT_FILE_NAME,
     USER_PROMPT_SUBMIT_HOOK_SCRIPT_FILE_NAME,
     inspect_hook_registration_for_project,
 )
+
+EVERY_HOOK_EVENT_NAME = set(HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME)
 
 HOOK_SCRIPTS_DIRECTORY = "/opt/manual-context-persistence/hooks"
 
@@ -59,16 +62,13 @@ def commands_registered_for_event(project_directory: str, event_name: str) -> li
     ]
 
 
-def test_installing_into_nothing_registers_both_hooks(tmp_path) -> None:
+def test_installing_into_nothing_registers_every_hook(tmp_path) -> None:
     project_directory = str(tmp_path)
 
     result = install_into(project_directory)
 
-    assert set(result.installed_hook_event_names) == {"Stop", "UserPromptSubmit"}
-    assert set(read_settings(project_directory)["hooks"]) == {
-        "Stop",
-        "UserPromptSubmit",
-    }
+    assert set(result.installed_hook_event_names) == EVERY_HOOK_EVENT_NAME
+    assert set(read_settings(project_directory)["hooks"]) == EVERY_HOOK_EVENT_NAME
 
 
 def test_what_is_installed_is_what_the_preflight_recognises(tmp_path) -> None:
@@ -153,10 +153,9 @@ def test_installing_twice_adds_nothing_the_second_time(tmp_path) -> None:
     second_result = install_into(project_directory)
 
     assert second_result.installed_hook_event_names == []
-    assert set(second_result.already_registered_hook_event_names) == {
-        "Stop",
-        "UserPromptSubmit",
-    }
+    assert set(second_result.already_registered_hook_event_names) == (
+        EVERY_HOOK_EVENT_NAME
+    )
     assert len(commands_registered_for_event(project_directory, "Stop")) == 1
 
 
@@ -182,8 +181,9 @@ def test_only_the_missing_hook_is_added(tmp_path) -> None:
 
     result = install_into(project_directory)
 
-    assert result.installed_hook_event_names == ["UserPromptSubmit"]
+    assert "Stop" not in result.installed_hook_event_names
     assert result.already_registered_hook_event_names == ["Stop"]
+    assert set(result.installed_hook_event_names) == EVERY_HOOK_EVENT_NAME - {"Stop"}
     assert len(commands_registered_for_event(project_directory, "Stop")) == 1
 
 

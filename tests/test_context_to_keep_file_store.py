@@ -34,7 +34,9 @@ def build_store_with_scripted_timestamps(
 
 
 def build_package(summary_text: str = "did the thing") -> ContextToKeepPackage:
-    return ContextToKeepPackage(context_to_keep=[summary_text])
+    return ContextToKeepPackage(
+        next_task="Ask the user which pad naming should win.", context_to_keep=[summary_text]
+    )
 
 
 def test_reading_before_anything_is_written_returns_none(tmp_path) -> None:

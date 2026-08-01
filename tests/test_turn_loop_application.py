@@ -28,6 +28,9 @@ from context_handoff.application.turn_loop_application import (
 from context_handoff.orchestration.branch_session_preamble import (
     GIT_COMMIT_REQUIREMENT_SENTENCE,
 )
+from context_handoff.startup.hook_registration_preflight import (
+    HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME,
+)
 from context_handoff.project_state.context_handoff_settings_store import (
     ContextHandoffSettings,
     ContextHandoffSettingsStore,
@@ -55,19 +58,18 @@ def write_harness_settings(project_directory: str, settings_dictionary: dict) ->
     return settings_path
 
 
-def write_settings_registering_both_hooks(project_directory: str) -> str:
+def write_settings_registering_every_hook(project_directory: str) -> str:
+    """Registered exactly as the installer registers them, for every hook."""
     return write_harness_settings(
         project_directory,
         {
             "hooks": {
-                "Stop": [
-                    build_hook_event_entry("python3 context_to_keep_stop_hook.py")
-                ],
-                "UserPromptSubmit": [
-                    build_hook_event_entry(
-                        "python3 user_prompt_submit_capture_hook.py"
-                    )
-                ],
+                hook_event_name: [
+                    build_hook_event_entry(f"python3 {script_file_name}")
+                ]
+                for hook_event_name, script_file_name in (
+                    HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME.items()
+                )
             }
         },
     )
@@ -94,26 +96,35 @@ class ApplicationTestHarness:
         self.project_directory = str(tmp_path / "project")
         os.makedirs(self.project_directory, exist_ok=True)
         # A stand-in repository to copy from, and a stand-in home to copy to,
-        # so no test touches the developer's real ~/.claude.
-        self.hook_scripts_source_directory = str(tmp_path / "repository" / "hooks")
+        # so no test touches the developer's real ~/.claude. The stand-in carries
+        # a package directory as well as the scripts, because a source without one
+        # is a deployment failure rather than a fixture.
+        self.repository_root_directory = str(tmp_path / "repository")
+        self.hook_scripts_source_directory = os.path.join(
+            self.repository_root_directory, "hooks"
+        )
         os.makedirs(self.hook_scripts_source_directory, exist_ok=True)
-        for hook_script_file_name in (
-            "context_to_keep_stop_hook.py",
-            "user_prompt_submit_capture_hook.py",
-        ):
+        os.makedirs(
+            os.path.join(self.repository_root_directory, "context_handoff"),
+            exist_ok=True,
+        )
+        for hook_script_file_name in HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME.values():
             with open(
                 os.path.join(self.hook_scripts_source_directory, hook_script_file_name),
                 "w",
                 encoding="utf-8",
             ) as hook_script_file:
                 hook_script_file.write("# stand-in\n")
-        self.deployed_hook_scripts_directory = str(tmp_path / "home" / "hooks")
+        self.deployed_runtime_directory = str(tmp_path / "home" / "mcp-app")
+        self.deployed_hook_scripts_directory = os.path.join(
+            self.deployed_runtime_directory, "hooks"
+        )
 
         self.harness_settings_path = os.path.join(
             self.project_directory, ".claude", "settings.local.json"
         )
         if harness_settings_state == SETTINGS_REGISTERING_OUR_HOOKS:
-            write_settings_registering_both_hooks(self.project_directory)
+            write_settings_registering_every_hook(self.project_directory)
         elif harness_settings_state == SETTINGS_PRESENT_WITHOUT_OUR_HOOKS:
             write_settings_belonging_to_someone_else(self.project_directory)
 
@@ -124,8 +135,8 @@ class ApplicationTestHarness:
 
         self.request = TurnLoopApplicationRequest(
             project_directory=self.project_directory,
-            hook_scripts_source_directory=self.hook_scripts_source_directory,
-            deployed_hook_scripts_directory=self.deployed_hook_scripts_directory,
+            repository_root_directory=self.repository_root_directory,
+            deployed_runtime_directory=self.deployed_runtime_directory,
             **request_overrides,
         )
 
@@ -190,7 +201,7 @@ def test_no_settings_file_at_all_is_set_up_without_asking(tmp_path) -> None:
 
     assert application.run(scripted_answers=[]) == EXIT_CODE_SUCCESS
     installed_hooks = application.read_harness_settings()["hooks"]
-    assert set(installed_hooks) == {"Stop", "UserPromptSubmit"}
+    assert set(installed_hooks) == set(HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME)
 
 
 def test_the_installed_command_points_at_the_deployed_scripts_not_the_repository(
@@ -225,10 +236,7 @@ def test_the_scripts_are_deployed_before_the_command_naming_them_is_written(
 
     application.run(scripted_answers=[])
 
-    for hook_script_file_name in (
-        "context_to_keep_stop_hook.py",
-        "user_prompt_submit_capture_hook.py",
-    ):
+    for hook_script_file_name in HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME.values():
         assert os.path.exists(
             os.path.join(
                 application.deployed_hook_scripts_directory, hook_script_file_name
@@ -293,7 +301,7 @@ def test_an_existing_settings_file_without_our_hooks_asks_first(tmp_path) -> Non
 
     assert application.run(scripted_answers=["install"]) == EXIT_CODE_SUCCESS
     installed_hooks = application.read_harness_settings()["hooks"]
-    assert set(installed_hooks) == {"Stop", "UserPromptSubmit"}
+    assert set(installed_hooks) == set(HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME)
 
 
 def test_installing_preserves_what_was_already_in_the_file(tmp_path) -> None:
@@ -375,7 +383,7 @@ def test_no_request_field_can_bypass_the_hooks(tmp_path) -> None:
     assert not hasattr(
         TurnLoopApplicationRequest(
             project_directory=str(tmp_path),
-            hook_scripts_source_directory=str(tmp_path),
+            repository_root_directory=str(tmp_path),
         ),
         "skip_hook_preflight",
     )

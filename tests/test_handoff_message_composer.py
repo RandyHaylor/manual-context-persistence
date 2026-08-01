@@ -33,7 +33,8 @@ def build_entry(
 
 def build_package() -> ContextToKeepPackage:
     return ContextToKeepPackage(
-        context_to_keep=["The parser is pure.", "Timeouts are reported."]
+        next_task="Ask the user which pad naming should win.",
+        context_to_keep=["The parser is pure.", "Timeouts are reported."],
     )
 
 
@@ -112,7 +113,9 @@ def test_a_package_carrying_nothing_still_composes() -> None:
     """A turn can produce nothing worth keeping; the prompt still travels."""
     message = compose_handoff_message_for_base_session(
         user_prompt_entries=[build_entry(0, "do the thing")],
-        context_to_keep_package=ContextToKeepPackage(context_to_keep=[]),
+        context_to_keep_package=ContextToKeepPackage(
+            next_task="Ask the user which pad naming should win.", context_to_keep=[]
+        ),
     )
     assert "do the thing" in message
     assert ACKNOWLEDGE_ONLY_INSTRUCTION_TEXT in message
@@ -121,7 +124,9 @@ def test_a_package_carrying_nothing_still_composes() -> None:
 def test_the_message_is_mostly_the_material_it_carries() -> None:
     """Everything that is not prompt or context text is overhead."""
     prompt_text = "x" * 400
-    package = ContextToKeepPackage(context_to_keep=["z" * 400])
+    package = ContextToKeepPackage(
+        next_task="Ask the user which pad naming should win.", context_to_keep=["z" * 400]
+    )
     message = compose_handoff_message_for_base_session(
         user_prompt_entries=[build_entry(0, prompt_text)],
         context_to_keep_package=package,

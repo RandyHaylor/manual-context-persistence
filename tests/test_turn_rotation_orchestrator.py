@@ -58,14 +58,20 @@ class OrchestratorTestHarness:
         )
 
     def stage_completed_turn(
-        self, branch_session_identifier: str, user_prompt_text: str = "do the thing"
+        self,
+        branch_session_identifier: str,
+        user_prompt_text: str = "do the thing",
+        next_task_text: str = "Ask the user which pad naming should win.",
     ) -> None:
         """Simulate what a finished branch turn leaves behind on disk."""
         self.user_prompt_log_store.append_user_prompt_entry(
             branch_session_identifier, user_prompt_text
         )
         self.context_to_keep_store.write_pending_context_to_keep_package(
-            ContextToKeepPackage(context_to_keep=["A fact worth keeping."])
+            ContextToKeepPackage(
+                next_task=next_task_text,
+                context_to_keep=["A fact worth keeping."],
+            )
         )
 
     def window_event_kinds(self) -> list[str]:
@@ -93,6 +99,103 @@ def test_starting_opens_the_window_and_runs_a_branch_in_it(test_harness) -> None
     ]
     assert "run_command_line_in_shared_window" in test_harness.window_event_kinds()
     assert branch_session_identifier
+
+
+def test_only_the_first_session_is_seeded_with_the_request_for_instructions(
+    test_harness,
+) -> None:
+    """Found in a real run, so it is pinned at the level that decides it.
+
+    The first session opens before the user has said anything, so it is told to
+    ask. Every session after a rotation exists because the user did speak and
+    work was done, so the same sentence there would contradict the situation it
+    is in — and would spend a turn asking a question nobody is waiting on.
+    """
+    from context_handoff.orchestration.branch_session_preamble import (
+        REQUEST_INSTRUCTIONS_SENTENCE,
+    )
+
+    first_branch_session_identifier = (
+        test_harness.orchestrator.start_first_branch_session()
+    )
+    test_harness.stage_completed_turn(first_branch_session_identifier)
+    rotation_outcome = test_harness.orchestrator.rotate_to_next_branch_session()
+
+    seeds_by_session = test_harness.fake_harness.submitted_texts_by_session_identifier
+    assert REQUEST_INSTRUCTIONS_SENTENCE in (
+        seeds_by_session[first_branch_session_identifier][0]
+    )
+    assert REQUEST_INSTRUCTIONS_SENTENCE not in (
+        seeds_by_session[rotation_outcome.new_branch_session_identifier][0]
+    )
+
+
+def test_the_next_task_named_by_one_session_seeds_the_session_that_follows(
+    test_harness,
+) -> None:
+    """The whole point of the field, checked where it actually has to survive.
+
+    The package is retired into history before the next session is launched, so
+    this proves the task is still in hand at launch rather than read back from a
+    file that has already moved.
+    """
+    distinctive_next_task_text = "Report the WOMBAT-8842 findings to the user."
+    first_branch_session_identifier = (
+        test_harness.orchestrator.start_first_branch_session()
+    )
+    test_harness.stage_completed_turn(
+        first_branch_session_identifier, next_task_text=distinctive_next_task_text
+    )
+
+    rotation_outcome = test_harness.orchestrator.rotate_to_next_branch_session()
+
+    seed_given_to_the_new_session = (
+        test_harness.fake_harness.submitted_texts_by_session_identifier[
+            rotation_outcome.new_branch_session_identifier
+        ][0]
+    )
+    assert distinctive_next_task_text in seed_given_to_the_new_session
+
+
+def test_the_next_task_is_not_sent_to_the_accumulating_session(test_harness) -> None:
+    """It is passed from one working session to the next, and nowhere else.
+
+    The session that accumulates history has no user turn to act on, so an
+    instruction there has nothing to do and would only add to what it carries.
+    """
+    distinctive_next_task_text = "Report the WOMBAT-8842 findings to the user."
+    first_branch_session_identifier = (
+        test_harness.orchestrator.start_first_branch_session()
+    )
+    test_harness.stage_completed_turn(
+        first_branch_session_identifier, next_task_text=distinctive_next_task_text
+    )
+
+    test_harness.orchestrator.rotate_to_next_branch_session()
+
+    texts_sent_to_the_accumulating_session = (
+        test_harness.fake_harness.submitted_texts_by_session_identifier[
+            BASE_SESSION_IDENTIFIER
+        ]
+    )
+    for submitted_text in texts_sent_to_the_accumulating_session:
+        assert distinctive_next_task_text not in submitted_text
+
+
+def test_every_session_is_seeded_with_the_output_contract(test_harness) -> None:
+    """The format is needed on every session; only the opening sentence differs."""
+    first_branch_session_identifier = (
+        test_harness.orchestrator.start_first_branch_session()
+    )
+    test_harness.stage_completed_turn(first_branch_session_identifier)
+    rotation_outcome = test_harness.orchestrator.rotate_to_next_branch_session()
+
+    seeds_by_session = test_harness.fake_harness.submitted_texts_by_session_identifier
+    for session_identifier in (
+        first_branch_session_identifier,
+        rotation_outcome.new_branch_session_identifier,
+    ):
+        assert "## Output format" in seeds_by_session[session_identifier][0]
 
 
 def test_the_branch_command_line_comes_from_the_harness(test_harness) -> None:

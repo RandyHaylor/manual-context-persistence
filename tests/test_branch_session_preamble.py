@@ -19,12 +19,17 @@ from context_handoff.context_to_keep.context_to_keep_package import (
     CONTEXT_TO_KEEP_FIELD_NAME,
     CONTEXT_TO_KEEP_PACKAGE_VERSION,
     CONTEXT_TO_KEEP_VERSION_FIELD_NAME,
+    NEXT_TASK_FIELD_NAME,
     extract_context_to_keep_package_from_agent_response,
 )
 from context_handoff.orchestration.branch_session_preamble import (
     BRANCH_SESSION_PREAMBLE_TEXT,
+    FIRST_BRANCH_SESSION_PREAMBLE_TEXT,
     GIT_COMMIT_REQUIREMENT_SENTENCE,
+    REQUEST_INSTRUCTIONS_SENTENCE,
     build_branch_session_preamble_text,
+    build_first_branch_session_preamble_text,
+    build_rotated_branch_session_preamble_text,
 )
 
 
@@ -46,6 +51,7 @@ def test_the_example_block_matches_the_shape_the_parser_expects() -> None:
     assert set(example) == {
         CONTEXT_TO_KEEP_VERSION_FIELD_NAME,
         CONTEXT_TO_KEEP_FIELD_NAME,
+        NEXT_TASK_FIELD_NAME,
     }
     assert example[CONTEXT_TO_KEEP_VERSION_FIELD_NAME] == CONTEXT_TO_KEEP_PACKAGE_VERSION
 
@@ -91,7 +97,7 @@ def test_both_fields_are_named_with_their_types() -> None:
 
 def test_the_field_list_is_stated_to_be_exhaustive() -> None:
     guidance = guidance_before_the_example(BRANCH_SESSION_PREAMBLE_TEXT).lower()
-    assert "both required" in guidance
+    assert "all required" in guidance
     assert "no others" in guidance
 
 
@@ -190,6 +196,95 @@ def test_the_commit_is_asked_for_before_the_block_is_emitted() -> None:
     with_commit = build_branch_session_preamble_text(require_git_commit=True)
     assert with_commit.index(GIT_COMMIT_REQUIREMENT_SENTENCE) < with_commit.index(
         f"```{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}"
+    )
+
+
+def test_the_contract_requires_a_next_task_and_says_what_counts_as_one() -> None:
+    """Anything is a valid next task, so the field list has to say so.
+
+    Without the examples it reads as "the next unit of building", and a session
+    whose honest next step is a question has nothing valid to write.
+    """
+    guidance = guidance_before_the_example(BRANCH_SESSION_PREAMBLE_TEXT)
+    assert f"`{NEXT_TASK_FIELD_NAME}` (string)" in guidance
+    lowercased = guidance.lower()
+    assert "the next action to take" in lowercased
+    assert "asking the user a question" in lowercased
+    assert "reporting results" in lowercased
+
+
+def test_the_example_names_a_next_task_that_is_not_more_building() -> None:
+    example = read_example_block(BRANCH_SESSION_PREAMBLE_TEXT)
+    assert example[NEXT_TASK_FIELD_NAME].strip()
+
+
+def test_a_rotated_session_is_seeded_with_the_task_it_was_given() -> None:
+    """The point of the field: the loop continues rather than restarting."""
+    rotated_text = build_rotated_branch_session_preamble_text(
+        "Report the duplicate-selector findings to the user."
+    )
+    assert "Report the duplicate-selector findings to the user." in rotated_text
+    assert REQUEST_INSTRUCTIONS_SENTENCE not in rotated_text
+
+
+def test_a_rotated_session_is_given_the_task_before_the_output_format() -> None:
+    """Every seed opens with what to do, then how to report it."""
+    rotated_text = build_rotated_branch_session_preamble_text("Do the next thing.")
+    assert rotated_text.index("Do the next thing.") < rotated_text.index(
+        "## Output format"
+    )
+
+
+def test_every_seed_ends_with_the_identical_contract() -> None:
+    """One contract, three openings — not three documents to keep in step."""
+    assert build_rotated_branch_session_preamble_text("anything").endswith(
+        BRANCH_SESSION_PREAMBLE_TEXT
+    )
+    assert FIRST_BRANCH_SESSION_PREAMBLE_TEXT.endswith(BRANCH_SESSION_PREAMBLE_TEXT)
+
+
+def test_the_commit_requirement_reaches_a_rotated_session_too() -> None:
+    assert GIT_COMMIT_REQUIREMENT_SENTENCE in (
+        build_rotated_branch_session_preamble_text("anything", require_git_commit=True)
+    )
+    assert GIT_COMMIT_REQUIREMENT_SENTENCE not in (
+        build_rotated_branch_session_preamble_text("anything")
+    )
+
+
+def test_only_the_first_session_is_told_to_ask_for_instructions() -> None:
+    """Found in a real run, so it is pinned rather than left to be tidied away.
+
+    The first session of a run is the only one opened before the user has said
+    anything: this text arrives as a message, the session answers it, and with no
+    stated first action it looked for a request, found none, and replied asking
+    what the user wanted — a reply to nobody.
+
+    Every later session is opened because the user did speak and work was done,
+    so the same sentence there would contradict the situation it is in.
+    """
+    assert REQUEST_INSTRUCTIONS_SENTENCE in FIRST_BRANCH_SESSION_PREAMBLE_TEXT
+    assert REQUEST_INSTRUCTIONS_SENTENCE not in BRANCH_SESSION_PREAMBLE_TEXT
+
+
+def test_the_first_action_comes_before_the_output_format() -> None:
+    """What to do now, then how to report later."""
+    assert FIRST_BRANCH_SESSION_PREAMBLE_TEXT.index(
+        REQUEST_INSTRUCTIONS_SENTENCE
+    ) < FIRST_BRANCH_SESSION_PREAMBLE_TEXT.index("## Output format")
+
+
+def test_both_sessions_receive_the_identical_contract() -> None:
+    """The difference is one sentence, not a second format to keep in step."""
+    assert FIRST_BRANCH_SESSION_PREAMBLE_TEXT.endswith(BRANCH_SESSION_PREAMBLE_TEXT)
+
+
+def test_the_commit_requirement_reaches_the_first_session_too() -> None:
+    assert GIT_COMMIT_REQUIREMENT_SENTENCE in build_first_branch_session_preamble_text(
+        require_git_commit=True
+    )
+    assert GIT_COMMIT_REQUIREMENT_SENTENCE not in (
+        build_first_branch_session_preamble_text()
     )
 
 

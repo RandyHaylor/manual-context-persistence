@@ -10,8 +10,10 @@ import json
 import os
 
 from context_handoff.startup.hook_registration_preflight import (
+    HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME,
+    STOP_HOOK_EVENT_NAME,
     STOP_HOOK_SCRIPT_FILE_NAME,
-    USER_PROMPT_SUBMIT_HOOK_SCRIPT_FILE_NAME,
+    USER_PROMPT_SUBMIT_HOOK_EVENT_NAME,
     inspect_hook_registration_for_project,
 )
 
@@ -25,41 +27,32 @@ def write_settings(project_directory: str, settings_dictionary: dict) -> str:
     return settings_path
 
 
-def build_settings_with_hooks(
-    include_stop_hook: bool = True, include_user_prompt_submit_hook: bool = True
-) -> dict:
+def build_settings_with_hooks(omitted_hook_event_names: tuple = ()) -> dict:
+    """Every hook this system needs, minus any the caller wants left out."""
     hooks_dictionary: dict = {}
-    if include_stop_hook:
-        hooks_dictionary["Stop"] = [
+    for hook_event_name, script_file_name in (
+        HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME.items()
+    ):
+        if hook_event_name in omitted_hook_event_names:
+            continue
+        hooks_dictionary[hook_event_name] = [
             {
                 "matcher": "*",
                 "hooks": [
-                    {"type": "command", "command": f"python3 /x/{STOP_HOOK_SCRIPT_FILE_NAME}"}
-                ],
-            }
-        ]
-    if include_user_prompt_submit_hook:
-        hooks_dictionary["UserPromptSubmit"] = [
-            {
-                "matcher": "*",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": (
-                            f"python3 /x/{USER_PROMPT_SUBMIT_HOOK_SCRIPT_FILE_NAME}"
-                        ),
-                    }
+                    {"type": "command", "command": f"python3 /x/{script_file_name}"}
                 ],
             }
         ]
     return {"hooks": hooks_dictionary}
 
 
-def test_a_project_with_no_settings_file_is_missing_both_hooks(tmp_path) -> None:
+def test_a_project_with_no_settings_file_is_missing_every_hook(tmp_path) -> None:
     report = inspect_hook_registration_for_project(str(tmp_path))
     assert report.settings_file_exists is False
-    assert report.stop_hook_is_registered is False
-    assert report.user_prompt_submit_hook_is_registered is False
+    assert report.registered_hook_event_names == frozenset()
+    assert sorted(report.missing_hook_event_names) == sorted(
+        HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME
+    )
     assert report.is_ready_to_run is False
 
 
@@ -71,20 +64,40 @@ def test_a_fully_registered_project_is_ready(tmp_path) -> None:
 
 
 def test_a_missing_stop_hook_is_named_in_the_report(tmp_path) -> None:
-    write_settings(str(tmp_path), build_settings_with_hooks(include_stop_hook=False))
+    write_settings(
+        str(tmp_path),
+        build_settings_with_hooks(omitted_hook_event_names=(STOP_HOOK_EVENT_NAME,)),
+    )
     report = inspect_hook_registration_for_project(str(tmp_path))
-    assert report.stop_hook_is_registered is False
-    assert report.user_prompt_submit_hook_is_registered is True
-    assert report.missing_hook_event_names == ["Stop"]
+    assert STOP_HOOK_EVENT_NAME not in report.registered_hook_event_names
+    assert USER_PROMPT_SUBMIT_HOOK_EVENT_NAME in report.registered_hook_event_names
+    assert report.missing_hook_event_names == [STOP_HOOK_EVENT_NAME]
     assert report.is_ready_to_run is False
 
 
 def test_a_missing_prompt_hook_is_named_in_the_report(tmp_path) -> None:
     write_settings(
-        str(tmp_path), build_settings_with_hooks(include_user_prompt_submit_hook=False)
+        str(tmp_path),
+        build_settings_with_hooks(
+            omitted_hook_event_names=(USER_PROMPT_SUBMIT_HOOK_EVENT_NAME,)
+        ),
     )
     report = inspect_hook_registration_for_project(str(tmp_path))
-    assert report.missing_hook_event_names == ["UserPromptSubmit"]
+    assert report.missing_hook_event_names == [USER_PROMPT_SUBMIT_HOOK_EVENT_NAME]
+
+
+def test_every_hook_the_system_needs_is_checked_for(tmp_path) -> None:
+    """Adding a hook must not quietly leave the check behind."""
+    for omitted_hook_event_name in HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME:
+        write_settings(
+            str(tmp_path),
+            build_settings_with_hooks(
+                omitted_hook_event_names=(omitted_hook_event_name,)
+            ),
+        )
+        report = inspect_hook_registration_for_project(str(tmp_path))
+        assert report.missing_hook_event_names == [omitted_hook_event_name]
+        assert report.is_ready_to_run is False
 
 
 def test_a_hook_registered_for_the_wrong_script_does_not_count(tmp_path) -> None:
@@ -105,7 +118,7 @@ def test_a_hook_registered_for_the_wrong_script_does_not_count(tmp_path) -> None
         },
     )
     report = inspect_hook_registration_for_project(str(tmp_path))
-    assert report.stop_hook_is_registered is False
+    assert STOP_HOOK_EVENT_NAME not in report.registered_hook_event_names
 
 
 def test_this_projects_hook_is_found_alongside_unrelated_hooks(tmp_path) -> None:

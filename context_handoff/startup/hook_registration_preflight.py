@@ -21,26 +21,34 @@ PROJECT_SETTINGS_FILE_NAME = "settings.local.json"
 
 STOP_HOOK_EVENT_NAME = "Stop"
 USER_PROMPT_SUBMIT_HOOK_EVENT_NAME = "UserPromptSubmit"
+POST_TOOL_USE_HOOK_EVENT_NAME = "PostToolUse"
 
 STOP_HOOK_SCRIPT_FILE_NAME = "context_to_keep_stop_hook.py"
 USER_PROMPT_SUBMIT_HOOK_SCRIPT_FILE_NAME = "user_prompt_submit_capture_hook.py"
+POST_TOOL_USE_HOOK_SCRIPT_FILE_NAME = "post_tool_use_handoff_reminder_hook.py"
+
+# One place naming every hook this system needs, so adding one is a single entry
+# here rather than a new field, a new branch, and a new place to forget.
+HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME = {
+    STOP_HOOK_EVENT_NAME: STOP_HOOK_SCRIPT_FILE_NAME,
+    USER_PROMPT_SUBMIT_HOOK_EVENT_NAME: USER_PROMPT_SUBMIT_HOOK_SCRIPT_FILE_NAME,
+    POST_TOOL_USE_HOOK_EVENT_NAME: POST_TOOL_USE_HOOK_SCRIPT_FILE_NAME,
+}
 
 
 @dataclass(frozen=True)
 class HookRegistrationReport:
     settings_file_exists: bool
-    stop_hook_is_registered: bool
-    user_prompt_submit_hook_is_registered: bool
+    registered_hook_event_names: frozenset
     detail_text: str
 
     @property
     def missing_hook_event_names(self) -> list[str]:
-        missing_event_names: list[str] = []
-        if not self.stop_hook_is_registered:
-            missing_event_names.append(STOP_HOOK_EVENT_NAME)
-        if not self.user_prompt_submit_hook_is_registered:
-            missing_event_names.append(USER_PROMPT_SUBMIT_HOOK_EVENT_NAME)
-        return missing_event_names
+        return [
+            hook_event_name
+            for hook_event_name in HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME
+            if hook_event_name not in self.registered_hook_event_names
+        ]
 
     @property
     def is_ready_to_run(self) -> bool:
@@ -88,12 +96,11 @@ def inspect_hook_registration_for_project(
     if not settings_file_exists:
         return HookRegistrationReport(
             settings_file_exists=False,
-            stop_hook_is_registered=False,
-            user_prompt_submit_hook_is_registered=False,
+            registered_hook_event_names=frozenset(),
             detail_text=(
-                f"no {PROJECT_SETTINGS_FILE_NAME} at {settings_path}; register the "
-                f"{STOP_HOOK_EVENT_NAME} and {USER_PROMPT_SUBMIT_HOOK_EVENT_NAME} hooks "
-                "there before starting the turn loop"
+                f"no {PROJECT_SETTINGS_FILE_NAME} at {settings_path}; the "
+                + ", ".join(HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME)
+                + " hooks are not registered there"
             ),
         )
 
@@ -101,31 +108,30 @@ def inspect_hook_registration_for_project(
     if not settings_dictionary:
         return HookRegistrationReport(
             settings_file_exists=True,
-            stop_hook_is_registered=False,
-            user_prompt_submit_hook_is_registered=False,
+            registered_hook_event_names=frozenset(),
             detail_text=(
                 f"could not read usable settings from {PROJECT_SETTINGS_FILE_NAME} at "
                 f"{settings_path}"
             ),
         )
 
-    stop_hook_is_registered = _event_registers_script(
-        settings_dictionary, STOP_HOOK_EVENT_NAME, STOP_HOOK_SCRIPT_FILE_NAME
-    )
-    user_prompt_submit_hook_is_registered = _event_registers_script(
-        settings_dictionary,
-        USER_PROMPT_SUBMIT_HOOK_EVENT_NAME,
-        USER_PROMPT_SUBMIT_HOOK_SCRIPT_FILE_NAME,
+    registered_hook_event_names = frozenset(
+        hook_event_name
+        for hook_event_name, script_file_name in (
+            HOOK_SCRIPT_FILE_NAMES_BY_EVENT_NAME.items()
+        )
+        if _event_registers_script(
+            settings_dictionary, hook_event_name, script_file_name
+        )
     )
 
     report = HookRegistrationReport(
         settings_file_exists=True,
-        stop_hook_is_registered=stop_hook_is_registered,
-        user_prompt_submit_hook_is_registered=user_prompt_submit_hook_is_registered,
+        registered_hook_event_names=registered_hook_event_names,
         detail_text="",
     )
     if report.is_ready_to_run:
-        detail_text = f"both hooks are registered in {settings_path}"
+        detail_text = f"every hook is registered in {settings_path}"
     else:
         detail_text = (
             f"{PROJECT_SETTINGS_FILE_NAME} at {settings_path} is missing hooks for: "
@@ -133,7 +139,6 @@ def inspect_hook_registration_for_project(
         )
     return HookRegistrationReport(
         settings_file_exists=True,
-        stop_hook_is_registered=stop_hook_is_registered,
-        user_prompt_submit_hook_is_registered=user_prompt_submit_hook_is_registered,
+        registered_hook_event_names=registered_hook_event_names,
         detail_text=detail_text,
     )
