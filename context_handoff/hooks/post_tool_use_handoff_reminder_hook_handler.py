@@ -15,9 +15,14 @@ judgement with nothing to measure it against, while "the point where you would
 commit" names a boundary an agent already recognises — and it holds whether or not
 the project uses git, because it describes when to stop rather than what to run.
 
-Gated to sessions the user works in, like the other hooks. The session that
-accumulates history and the orchestrator's own non-interactive calls have no
-handoff to make, and reminding them would be noise in a place nobody reads.
+Unlike the other two hooks, this one has no session gate, and needs none. Those
+gate because they *write*: a prompt logged from the wrong session corrupts the
+record of what the user said, and a handoff captured from the wrong session
+rotates a turn that was never the user's. This hook only speaks, and the sessions
+that reach it are the ones worth speaking to — the base session and the
+orchestrator's own non-interactive calls do not call tools, so this never fires
+for them. A gate here would add a way to go wrong (an unreadable registry denies
+by default) in exchange for suppressing an event that does not occur.
 """
 from __future__ import annotations
 
@@ -25,9 +30,6 @@ from typing import Any
 
 from context_handoff.context_to_keep.context_to_keep_package import (
     CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG,
-)
-from context_handoff.user_prompt_log.user_facing_session_registry import (
-    UserFacingSessionRegistry,
 )
 
 EMPTY_HOOK_RESPONSE: dict[str, Any] = {}
@@ -54,16 +56,8 @@ def build_additional_context_response(additional_context_text: str) -> dict[str,
 
 
 def handle_post_tool_use_payload(hook_payload: dict[str, Any]) -> dict[str, Any]:
-    """Return the reminder for a session the user works in, or nothing."""
+    """Return the reminder. The payload is not consulted; the firing is the signal."""
     try:
-        project_directory = hook_payload.get("cwd")
-        session_identifier = hook_payload.get("session_id")
-        if not project_directory or not session_identifier:
-            return EMPTY_HOOK_RESPONSE
-        if not UserFacingSessionRegistry(project_directory).is_user_facing_session(
-            session_identifier
-        ):
-            return EMPTY_HOOK_RESPONSE
         return build_additional_context_response(HANDOFF_REMINDER_TEXT)
     except Exception:
         # No hook may be the reason a session breaks, and this one only speaks.
