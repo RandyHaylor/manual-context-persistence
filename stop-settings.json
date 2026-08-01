@@ -1,5 +1,4 @@
 {
-  "auto-resume": true,
-  "additional-stop-message": "Drive the context-handoff POC to the spec in '1. claude-cli-context-handoff-poc.md' and '2. manual-context-persistence.md'. HARD RULES: test-first only, write the interface test before the implementation; look things up from official docs before coding; prove unknowns with a tiny standalone spike, never by running the whole app; reduce complexity, do not add it; do not drift from the spec and do not compromise. Integration-test budget is 20 real runs total - spend them only to confirm a fix that is already grounded in evidence. Record open questions and deferred issues in OPEN-QUESTIONS.md rather than asking. Set auto-resume to false when the spec is met or a genuine blocking question remains.",
-  "_comment": "Auto-resume for the drive-to-spec pass."
+  "auto-resume": false,
+  "_comment": "Drive-to-spec pass complete. Every item in both spec files is implemented and the loop has been driven end to end, including resuming an existing base session. What remains needs decisions from the user, and those are recorded in OPEN-QUESTIONS.md rather than guessed at."
 }

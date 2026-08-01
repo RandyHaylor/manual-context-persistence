@@ -17,12 +17,26 @@ and the decision to split summary from carried context are mine.
 ### 2. Workspace trust blocks unattended startup
 A branch launched in a fresh project directory stops on Claude Code's
 "Is this a project you created or one you trust?" prompt and waits. Every
-driven run so far has needed a human (or me) to answer `1`.
+driven run so far has needed someone to answer `1`.
 
-The spec does not mention it. Options if it matters: document it as a
-precondition, pre-trust the directory during startup, or have the orchestrator
-detect and answer it. I have not researched whether a supported non-interactive
-way to pre-trust exists.
+This is worse than a cosmetic pause. The documentation states that project
+settings are honoured "only after you accept the workspace trust dialog", and
+this system's capture hooks live in project settings — so before approval the
+loop runs and records nothing.
+
+Researched: there is **no documented way to pre-trust a directory**, no
+supported setting and no CLI flag. The decision is stored per project in
+`~/.claude.json` under `hasTrustDialogAccepted`, which is undocumented.
+
+What was done: startup reads that key and warns when it is definitely false,
+explaining that the branch will wait and nothing is captured until approval is
+given. Unknown is treated as unknown, so a directory the CLI has never opened
+produces no warning.
+
+What was NOT done, deliberately: writing that key to trust a directory
+automatically. That is an unsupported edit to internal state and a safety
+decision that belongs to whoever runs this, not to the tool. Say the word if
+you want it and I will add it behind an explicit opt-in flag.
 
 ### 3. Polling versus watching
 Spec 2 line 10 says the app "actively watches the cwd/.claude/context-to-keep.json

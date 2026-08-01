@@ -101,6 +101,44 @@ class ApplicationTestHarness:
         )
 
 
+def test_an_unapproved_project_is_warned_about_before_the_loop_starts(tmp_path) -> None:
+    """An unapproved directory produces a branch that waits and records nothing.
+
+    The harness withholds project settings until approval, and the capture
+    hooks live there. Saying so up front turns a silent hang into an explained
+    one.
+    """
+    application = ApplicationTestHarness(tmp_path, create_new_base_session_without_asking=True)
+    application.fake_harness.project_approval_by_working_directory[
+        application.project_directory
+    ] = False
+
+    exit_code = application.run()
+
+    assert exit_code == EXIT_CODE_SUCCESS
+    assert any("not been approved" in line for line in application.written_lines)
+
+
+def test_an_approved_project_is_not_warned_about(tmp_path) -> None:
+    application = ApplicationTestHarness(tmp_path, create_new_base_session_without_asking=True)
+    application.fake_harness.project_approval_by_working_directory[
+        application.project_directory
+    ] = True
+
+    application.run()
+
+    assert not any("not been approved" in line for line in application.written_lines)
+
+
+def test_an_unknown_approval_state_is_not_reported_as_a_problem(tmp_path) -> None:
+    """The state is read from undocumented storage; silence beats a false alarm."""
+    application = ApplicationTestHarness(tmp_path, create_new_base_session_without_asking=True)
+
+    application.run()
+
+    assert not any("not been approved" in line for line in application.written_lines)
+
+
 def test_an_unavailable_harness_stops_before_anything_is_created(tmp_path) -> None:
     application = ApplicationTestHarness(tmp_path, create_new_base_session_without_asking=True)
     application.fake_harness = FakeHarnessRecordingAllCalls(is_available=False)
