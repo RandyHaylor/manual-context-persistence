@@ -2,37 +2,6 @@
 
 Things noticed but deliberately not acted on. Nothing here is blocking.
 
-## Defects found by the twenty-turn endurance run
-
-### 0. The rotation status line can be concatenated into a user prompt
-Found in the prompt log after twenty turns of driving:
-
-    "...the manifest are all consistent with each other.echo 'updating base session...'"
-
-The orchestrator types `echo 'updating base session...'` into the shared window
-during rotation. If the user has typed into the branch's input box and not yet
-submitted, the status text lands in the same box and the two are submitted
-together — so a machine-generated string ends up inside a verbatim user prompt
-and is then forwarded to the base session as something the user said.
-
-This is the same class as the earlier capture-pollution defects, and the
-occurrence rate is low: one entry in nineteen, only when a prompt is typed
-during the rotation window.
-
-The tension is that spec 2 line 14 asks specifically for an echo. Options:
-
-  a. Keep the echo, but clear the input line first — discards whatever the user
-     had typed, which trades pollution for lost input. Worse.
-  b. Send the status somewhere that is not the input box, e.g. the terminal's
-     own status line. Satisfies the intent (the user sees "updating base
-     session...") without ever touching what they are typing.
-  c. Only echo once the interrupted session has actually exited, so the input
-     box belongs to a shell rather than an interactive agent.
-
-I have not chosen, because (b) departs from the literal wording of the spec and
-that is your call. My preference is (b), with (c) as a smaller change that
-narrows but does not close the window.
-
 ## Deferred issues
 
 ### A. Ghost text appears in the input box between turns

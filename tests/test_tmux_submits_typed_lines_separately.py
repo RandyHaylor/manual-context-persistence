@@ -88,14 +88,39 @@ def test_a_status_line_is_also_typed_then_submitted(tmp_path) -> None:
     assert len(recorded_settle_delays) == 1
 
 
-def test_an_interrupt_is_still_a_single_keystroke_with_no_enter(tmp_path) -> None:
-    """An interrupt is a key, not a line; an Enter after it submits whatever remains."""
+def test_repeated_interrupts_arrive_as_one_rapid_burst(tmp_path) -> None:
+    """Spacing decides whether the session cancels at all.
+
+    Verified against a real session: two interrupts sent back to back cancel it,
+    while interrupts two seconds apart clear the input box and leave the session
+    running — four in a row failed to end it. Sending them as separate commands
+    leaves that spacing at the mercy of process-launch latency, so they go in a
+    single call.
+    """
     adapter, fake_runner, recorded_settle_delays = build_adapter(tmp_path)
 
     adapter.send_interrupt_to_shared_window(WINDOW_IDENTIFIER, interrupt_repeat_count=2)
 
     calls = send_keys_calls(fake_runner)
-    assert len(calls) == 2
-    assert all("Enter" not in call for call in calls)
-    assert all("C-c" in call for call in calls)
+    assert len(calls) == 1
+    assert calls[0] == ["send-keys", "-t", WINDOW_IDENTIFIER, "C-c", "C-c"]
     assert recorded_settle_delays == []
+
+
+def test_a_single_interrupt_sends_one_key(tmp_path) -> None:
+    adapter, fake_runner, _ = build_adapter(tmp_path)
+
+    adapter.send_interrupt_to_shared_window(WINDOW_IDENTIFIER, interrupt_repeat_count=1)
+
+    assert send_keys_calls(fake_runner) == [
+        ["send-keys", "-t", WINDOW_IDENTIFIER, "C-c"]
+    ]
+
+
+def test_an_interrupt_never_carries_an_enter(tmp_path) -> None:
+    """An interrupt is a key, not a line; an Enter would submit what remains."""
+    adapter, fake_runner, _ = build_adapter(tmp_path)
+
+    adapter.send_interrupt_to_shared_window(WINDOW_IDENTIFIER, interrupt_repeat_count=2)
+
+    assert all("Enter" not in call for call in send_keys_calls(fake_runner))

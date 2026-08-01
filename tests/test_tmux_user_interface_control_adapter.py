@@ -141,7 +141,10 @@ def test_interrupt_is_sent_the_requested_number_of_times(tmp_path) -> None:
         for recorded_argv in fake_runner.find_recorded_argvs_for_subcommand("send-keys")
         if "C-c" in recorded_argv
     ]
-    assert len(interrupt_argvs) == 2
+    # One command carrying both, so they land as a rapid burst; spacing is what
+    # decides whether the session actually cancels.
+    assert len(interrupt_argvs) == 1
+    assert interrupt_argvs[0].count("C-c") == 2
     # An interrupt must not be followed by Enter, which would submit a line.
     assert "Enter" not in interrupt_argvs[0]
 

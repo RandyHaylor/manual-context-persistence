@@ -183,12 +183,20 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
         self, window_identifier: str, interrupt_repeat_count: int = 1
     ) -> None:
         self._require_open_window(window_identifier)
-        for _ in range(interrupt_repeat_count):
-            # No Enter: an interrupt is a keypress, and a trailing Enter would
-            # submit whatever line the interrupt left behind.
-            self._tmux_command_runner.run_tmux_command(
-                ["send-keys", "-t", window_identifier, "C-c"]
-            )
+        if interrupt_repeat_count < 1:
+            return
+        # One command carrying every interrupt, so they arrive as a rapid
+        # burst. Spacing decides whether the session cancels at all: verified
+        # against a real session, two interrupts back to back end it, while
+        # interrupts two seconds apart merely clear the input box and leave it
+        # running — four in a row failed to end it. Separate commands would
+        # leave that spacing to process-launch latency.
+        #
+        # No Enter: an interrupt is a keypress, and a trailing Enter would
+        # submit whatever line the interrupt left behind.
+        self._tmux_command_runner.run_tmux_command(
+            ["send-keys", "-t", window_identifier] + ["C-c"] * interrupt_repeat_count
+        )
 
     def display_status_line_in_shared_window(
         self, window_identifier: str, status_text: str
