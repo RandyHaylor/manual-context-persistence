@@ -12,9 +12,40 @@ transcript.
 
 ## Status
 
-The full loop runs against a real Claude CLI and a real tmux window. See
-[1. claude-cli-context-handoff-poc.md](1.%20claude-cli-context-handoff-poc.md)
-for the original design notes.
+The full loop has been driven end to end by hand against a real Claude CLI and
+a real tmux window: a codeword established in one branch was known by the next
+branch, which was forked fresh from the base and never told it directly.
+
+Design notes: [1. claude-cli-context-handoff-poc.md](1.%20claude-cli-context-handoff-poc.md)
+and [2. manual-context-persistence.md](2.%20manual-context-persistence.md).
+Decisions still open for review are in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
+
+One precondition is not automated: a branch launched in a project directory
+Claude Code has not seen before stops on its workspace-trust prompt and waits
+for an answer.
+
+## Which sessions count as the user's
+
+The orchestrator drives sessions of its own — the base session, and the
+short-lived calls that seed a branch or deliver a handoff. All of them end
+turns and submit prompts, so all of them reach the hooks.
+
+Branches are registered in `.claude/context-handoff-user-facing-sessions.json`,
+and both hooks ignore anything unregistered. Without that gate the verbatim log
+fills with the orchestrator's own words attributed to the user, and the base
+session's acknowledgements get captured as though they were a branch's work.
+Both were observed before the gate existed.
+
+Registration happens *after* a branch is seeded, so the briefing turn is
+excluded structurally rather than by asking the agent not to emit a package.
+
+## When a turn produces no handoff
+
+Every Stop hook run writes what it decided to
+`.claude/context-handoff-last-stop-hook-outcome.json`: the outcome, the reason,
+and how much agent text it was given. Read it first when a turn does not
+rotate — it distinguishes "the agent emitted no package" from "the package was
+unusable" from "that session is not one the user works in".
 
 ## Running it
 

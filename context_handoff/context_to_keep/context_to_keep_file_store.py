@@ -17,11 +17,13 @@ in tests.
 from __future__ import annotations
 
 import datetime
-import json
 import os
 from typing import Callable, Optional
 
-from context_handoff.project_state.project_state_directory import ProjectStateDirectory
+from context_handoff.project_state.project_state_directory import (
+    JsonDocumentFile,
+    ProjectStateDirectory,
+)
 
 from .context_to_keep_package import (
     ContextToKeepPackage,
@@ -126,9 +128,6 @@ class ContextToKeepFileStore:
         archived_dictionary[ROTATED_AT_TIMESTAMP_FIELD_NAME] = os.path.basename(
             history_path
         )[len("context-to-keep-") : -len(".json")]
-        with open(history_path, "w", encoding="utf-8") as history_file:
-            json.dump(archived_dictionary, history_file, indent=2, ensure_ascii=False)
-            history_file.write("\n")
-
+        JsonDocumentFile(history_path).write_dictionary(archived_dictionary)
         self._pending_document.write_empty()
         return history_path
