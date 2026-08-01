@@ -177,6 +177,9 @@ class ApplicationTestHarness:
             run_turn_loop_with=self.record_turn_loop_invocation,
             read_answer=read_answer,
             write_line=self.written_lines.append,
+            # Startup waits for a real terminal to draw before it sends a key at
+            # it. There is no terminal here, so there is nothing to wait for.
+            sleep_for_seconds=lambda _seconds: None,
         )
 
 

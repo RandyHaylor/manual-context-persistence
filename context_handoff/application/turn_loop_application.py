@@ -11,6 +11,7 @@ whole sequence runs in a test with no Claude CLI, no tmux, and no terminal.
 from __future__ import annotations
 
 import functools
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -184,7 +185,14 @@ def run_turn_loop_application(
     run_turn_loop_with: Callable[[TurnRotationOrchestrator], int],
     read_answer: Callable[[str], str],
     write_line: Callable[[str], None],
+    sleep_for_seconds: Callable[[float], None] = time.sleep,
 ) -> int:
+    """``sleep_for_seconds`` is injected only so tests need not really wait.
+
+    Startup waits for a real terminal to finish drawing before it aims a
+    keypress at it, which is seconds of genuine wall clock in production and
+    pure dead time in a test.
+    """
     availability_report = harness.verify_harness_available_and_authorized()
     if not availability_report.is_available:
         write_line(f"harness unavailable: {availability_report.detail_text}")
@@ -212,22 +220,26 @@ def run_turn_loop_application(
             base_session_choice.base_session_identifier_to_resume
         )
 
+    # Naming stays here, but the resolver applies it: creating a base session
+    # now needs the window it will be created in, and that window is named after
+    # the base session, so the two have to be settled together.
     resolved_base_session = resolve_base_session_for_startup(
         harness=harness,
+        user_interface_control=user_interface_control,
         working_directory=request.project_directory,
+        build_shared_window_identifier=(
+            lambda base_session_identifier: request.shared_window_identifier
+            or build_shared_window_identifier_for_base_session(base_session_identifier)
+        ),
         base_session_identifier_to_resume=base_session_identifier_to_resume,
+        sleep_for_seconds=sleep_for_seconds,
     )
     write_line(
         f"base session: {resolved_base_session.session_identifier} "
         f"({'created' if resolved_base_session.was_newly_created else 'resumed'})"
     )
 
-    shared_window_identifier = (
-        request.shared_window_identifier
-        or build_shared_window_identifier_for_base_session(
-            resolved_base_session.session_identifier
-        )
-    )
+    shared_window_identifier = resolved_base_session.shared_window_identifier
 
     effective_settings = (
         ContextHandoffSettingsStore(request.project_directory)

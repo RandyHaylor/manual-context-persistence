@@ -12,7 +12,6 @@ import inspect
 import pytest
 
 from context_handoff.interfaces.harness_interface import (
-    SessionCreationResult,
     HarnessAvailabilityReport,
     HarnessInterface,
     SessionAcknowledgment,
@@ -44,50 +43,100 @@ class HarnessInterfaceContractTestSuite:
                 "/directory/with/no/session"
             )
 
-    def test_branch_creation_returns_a_distinct_durable_identifier(self) -> None:
+    def test_allocated_branch_identifier_is_distinct_from_the_base(self) -> None:
         harness = self.build_harness_under_test()
-        result = harness.create_branch_session_from_base_session(
-            base_session_identifier=BASE_SESSION_IDENTIFIER_UNDER_TEST,
-            working_directory=WORKING_DIRECTORY_UNDER_TEST,
-            branch_seed_prompt_text="seed",
-        )
-        assert isinstance(result, SessionCreationResult)
-        assert result.session_identifier
-        assert result.session_identifier != BASE_SESSION_IDENTIFIER_UNDER_TEST
-        assert result.transcript_path
+        branch_session_identifier = harness.allocate_branch_session_identifier()
+        assert branch_session_identifier
+        assert branch_session_identifier != BASE_SESSION_IDENTIFIER_UNDER_TEST
 
-    def test_two_branches_of_one_base_get_different_identifiers(self) -> None:
+    def test_two_allocated_branch_identifiers_differ(self) -> None:
         harness = self.build_harness_under_test()
-        first_branch = harness.create_branch_session_from_base_session(
-            BASE_SESSION_IDENTIFIER_UNDER_TEST, WORKING_DIRECTORY_UNDER_TEST, "seed"
-        )
-        second_branch = harness.create_branch_session_from_base_session(
-            BASE_SESSION_IDENTIFIER_UNDER_TEST, WORKING_DIRECTORY_UNDER_TEST, "seed"
-        )
         assert (
-            first_branch.session_identifier
-            != second_branch.session_identifier
+            harness.allocate_branch_session_identifier()
+            != harness.allocate_branch_session_identifier()
         )
 
-    def test_base_session_creation_returns_a_durable_session(self) -> None:
+    def test_branch_fork_command_line_carries_base_branch_seed_and_name(self) -> None:
         harness = self.build_harness_under_test()
-        result = harness.create_base_session_with_preamble(
-            working_directory=WORKING_DIRECTORY_UNDER_TEST,
-            preamble_text="You are a base session that only accumulates context.",
+        branch_session_identifier = harness.allocate_branch_session_identifier()
+        command_line_argv = harness.build_interactive_branch_fork_command_line(
+            base_session_identifier=BASE_SESSION_IDENTIFIER_UNDER_TEST,
+            new_branch_session_identifier=branch_session_identifier,
+            branch_seed_prompt_text="seed text",
+            display_name="a branch",
         )
-        assert isinstance(result, SessionCreationResult)
-        assert result.session_identifier
-        assert result.transcript_path
+        assert isinstance(command_line_argv, list)
+        assert all(isinstance(argument, str) for argument in command_line_argv)
+        assert BASE_SESSION_IDENTIFIER_UNDER_TEST in command_line_argv
+        assert branch_session_identifier in command_line_argv
+        assert "seed text" in command_line_argv
+        assert "a branch" in command_line_argv
+
+    def test_branch_fork_command_line_is_never_non_interactive(self) -> None:
+        """The defect this contract exists to prevent.
+
+        A branch run headlessly finishes its turn before the user's window
+        exists, so the window they are given is already spent. Only the base
+        session may be driven without a terminal.
+        """
+        harness = self.build_harness_under_test()
+        command_line_argv = harness.build_interactive_branch_fork_command_line(
+            base_session_identifier=BASE_SESSION_IDENTIFIER_UNDER_TEST,
+            new_branch_session_identifier=harness.allocate_branch_session_identifier(),
+            branch_seed_prompt_text="seed text",
+            display_name="a branch",
+        )
+        assert "-p" not in command_line_argv
+        assert "--print" not in command_line_argv
+
+    def test_allocating_a_branch_identifier_creates_no_session(self) -> None:
+        """Allocation must be inert; the fork happens when the window runs."""
+        harness = self.build_harness_under_test()
+        branch_session_identifier = harness.allocate_branch_session_identifier()
+        assert (
+            harness.wait_until_session_transcript_is_durable(
+                session_identifier=branch_session_identifier,
+                working_directory=WORKING_DIRECTORY_UNDER_TEST,
+                timeout_seconds=0.0,
+            )
+            is False
+        )
+
+    def test_base_session_creation_command_line_carries_id_and_preamble(self) -> None:
+        harness = self.build_harness_under_test()
+        base_session_identifier = harness.allocate_base_session_identifier()
+        command_line_argv = harness.build_interactive_base_session_creation_command_line(
+            new_base_session_identifier=base_session_identifier,
+            preamble_text="You are a base session that only accumulates context.",
+            display_name="a base",
+        )
+        assert isinstance(command_line_argv, list)
+        assert all(isinstance(argument, str) for argument in command_line_argv)
+        assert base_session_identifier in command_line_argv
+        assert (
+            "You are a base session that only accumulates context."
+            in command_line_argv
+        )
+        assert "a base" in command_line_argv
+
+    def test_base_session_creation_command_line_is_interactive(self) -> None:
+        """It has to be: the trust prompt cannot be answered without a terminal."""
+        harness = self.build_harness_under_test()
+        command_line_argv = harness.build_interactive_base_session_creation_command_line(
+            new_base_session_identifier=harness.allocate_base_session_identifier(),
+            preamble_text="preamble",
+        )
+        assert "-p" not in command_line_argv
+        assert "--print" not in command_line_argv
+        # Nothing exists to resume from; this command is what creates it.
+        assert "--resume" not in command_line_argv
 
     def test_two_base_sessions_get_different_identifiers(self) -> None:
         harness = self.build_harness_under_test()
-        first_base = harness.create_base_session_with_preamble(
-            WORKING_DIRECTORY_UNDER_TEST, "preamble"
+        assert (
+            harness.allocate_base_session_identifier()
+            != harness.allocate_base_session_identifier()
         )
-        second_base = harness.create_base_session_with_preamble(
-            WORKING_DIRECTORY_UNDER_TEST, "preamble"
-        )
-        assert first_base.session_identifier != second_base.session_identifier
 
     def test_submission_returns_an_acknowledgment(self) -> None:
         harness = self.build_harness_under_test()
@@ -100,15 +149,15 @@ class HarnessInterfaceContractTestSuite:
         assert isinstance(acknowledgment.acknowledgment_text, str)
         assert isinstance(acknowledgment.timed_out, bool)
 
-    def test_interactive_command_line_is_argv_containing_the_session(self) -> None:
-        command_line_argv = self.build_harness_under_test().build_interactive_resume_command_line(
-            session_identifier=BASE_SESSION_IDENTIFIER_UNDER_TEST,
-            display_name="a branch",
+    def test_interface_exposes_no_way_to_open_a_session_without_forking(self) -> None:
+        """Opening and forking must stay one operation.
+
+        Two separate operations are what allowed a branch to be created ahead of
+        the window that was supposed to show it being created.
+        """
+        assert not hasattr(
+            self.build_harness_under_test(), "build_interactive_resume_command_line"
         )
-        assert isinstance(command_line_argv, list)
-        assert all(isinstance(argument, str) for argument in command_line_argv)
-        assert BASE_SESSION_IDENTIFIER_UNDER_TEST in command_line_argv
-        assert "a branch" in command_line_argv
 
     def test_interface_exposes_no_credential_management_operation(self) -> None:
         """The POC assumes an existing local OAuth login; nothing may manage it."""
@@ -136,12 +185,15 @@ class TestFakeHarnessSatisfiesHarnessInterfaceContract(HarnessInterfaceContractT
 
 def test_fake_harness_leaves_the_base_session_untouched_when_branching() -> None:
     harness = FakeHarnessRecordingAllCalls()
-    branch = harness.create_branch_session_from_base_session(
-        BASE_SESSION_IDENTIFIER_UNDER_TEST, WORKING_DIRECTORY_UNDER_TEST, "seed text"
+    branch_session_identifier = harness.allocate_branch_session_identifier()
+    harness.build_interactive_branch_fork_command_line(
+        base_session_identifier=BASE_SESSION_IDENTIFIER_UNDER_TEST,
+        new_branch_session_identifier=branch_session_identifier,
+        branch_seed_prompt_text="seed text",
     )
     assert BASE_SESSION_IDENTIFIER_UNDER_TEST not in harness.submitted_texts_by_session_identifier
     assert harness.submitted_texts_by_session_identifier[
-        branch.session_identifier
+        branch_session_identifier
     ] == ["seed text"]
 
 

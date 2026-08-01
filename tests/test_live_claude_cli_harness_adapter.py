@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
+import time
 import uuid
 
 import pytest
@@ -33,6 +35,11 @@ from context_handoff.adapters.claude_cli.non_interactive_process_launcher import
 LIVE_TEST_OPT_IN_ENVIRONMENT_VARIABLE_NAME = "CONTEXT_HANDOFF_RUN_LIVE_CLAUDE_TESTS"
 LIVE_SESSION_TIMEOUT_SECONDS = 240.0
 
+# Long enough for the CLI to have drawn whichever prompt it opens on before a
+# keypress is sent at it; a key delivered to a pane that is still starting up
+# lands nowhere.
+TERMINAL_STARTUP_GRACE_SECONDS = 8.0
+
 pytestmark = [
     pytest.mark.skipif(
         os.environ.get(LIVE_TEST_OPT_IN_ENVIRONMENT_VARIABLE_NAME) != "1",
@@ -42,6 +49,8 @@ pytestmark = [
         ),
     ),
     pytest.mark.skipif(shutil.which("claude") is None, reason="claude is not installed"),
+    # A branch is only ever forked inside a terminal now, so these tests need one.
+    pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux is not installed"),
 ]
 
 
@@ -51,6 +60,69 @@ def count_transcript_lines(session_identifier: str, working_directory: str) -> i
     )
     with open(transcript_path, "r", encoding="utf-8", errors="replace") as transcript_file:
         return sum(1 for _ in transcript_file)
+
+
+def fork_branch_through_a_real_terminal(
+    live_adapter, base_session_identifier: str, working_directory: str, seed_text: str
+) -> str:
+    """Fork a branch the only way the product does: in a real terminal.
+
+    A branch is never created headlessly, so a live test cannot create one with
+    a plain subprocess either — it has to run the adapter's argv inside a
+    terminal, exactly as the shared window does. The workspace-trust dialog is
+    answered here because an interactive launch in a directory the CLI has not
+    seen before opens on that prompt and would otherwise wait forever; `-p`
+    used to skip the dialog silently, which is precisely the behaviour this
+    design gave up.
+
+    Returns the branch's session identifier once its transcript is on disk.
+    """
+    branch_session_identifier = live_adapter.allocate_branch_session_identifier()
+    command_argv = live_adapter.build_interactive_branch_fork_command_line(
+        base_session_identifier=base_session_identifier,
+        new_branch_session_identifier=branch_session_identifier,
+        branch_seed_prompt_text=seed_text,
+    )
+    tmux_session_name = f"live-fork-{branch_session_identifier[:8]}"
+    subprocess.run(
+        ["tmux", "new-session", "-d", "-s", tmux_session_name, "-c", working_directory]
+        + command_argv,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        # Blind, and deliberately so: the prompt's default option is the
+        # trusting one, and a directory already trusted simply receives an
+        # Enter its prompt box discards.
+        time.sleep(TERMINAL_STARTUP_GRACE_SECONDS)
+        subprocess.run(
+            ["tmux", "send-keys", "-t", f"{tmux_session_name}:0", "Enter"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        became_durable = live_adapter.wait_until_session_transcript_is_durable(
+            session_identifier=branch_session_identifier,
+            working_directory=working_directory,
+            timeout_seconds=LIVE_SESSION_TIMEOUT_SECONDS,
+        )
+        assert became_durable, (
+            f"branch {branch_session_identifier} never appeared on disk; "
+            f"pane text was:\n"
+            + subprocess.run(
+                ["tmux", "capture-pane", "-p", "-t", f"{tmux_session_name}:0"],
+                capture_output=True,
+                text=True,
+            ).stdout
+        )
+    finally:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", tmux_session_name],
+            capture_output=True,
+            text=True,
+        )
+    return branch_session_identifier
 
 
 @pytest.fixture
@@ -108,24 +180,55 @@ def test_live_availability_probe_finds_the_installed_cli(live_adapter) -> None:
 def test_live_base_session_created_from_the_preamble_is_durable_and_forkable(
     live_adapter, live_working_directory
 ) -> None:
-    """Startup's create-a-new-base path, end to end against the real CLI."""
+    """Startup's create-a-new-base path, end to end against the real CLI.
+
+    Creation runs in a real tmux window because that is now the only way it
+    runs: the base session is created interactively so its workspace-trust
+    prompt can be answered, and only afterwards is it spoken to headlessly.
+    """
+    from context_handoff.adapters.tmux.tmux_command_runner import (
+        SubprocessTmuxCommandRunner,
+    )
+    from context_handoff.adapters.tmux.tmux_user_interface_control_adapter import (
+        TmuxUserInterfaceControlAdapter,
+    )
     from context_handoff.startup.base_session_resolver import (
         resolve_base_session_for_startup,
     )
 
-    resolved_base = resolve_base_session_for_startup(
-        harness=live_adapter,
-        working_directory=live_working_directory,
-        base_session_identifier_to_resume=None,
+    live_window_identifier = f"live-base-{uuid.uuid4().hex[:8]}"
+    user_interface_control = TmuxUserInterfaceControlAdapter(
+        tmux_command_runner=SubprocessTmuxCommandRunner(),
+        pane_output_log_directory=os.path.join(live_working_directory, "pane-logs"),
+        # No window on screen: this runs unattended.
+        attach_terminal_emulator=lambda _window_identifier: None,
     )
-    assert resolved_base.was_newly_created is True
+    try:
+        resolved_base = resolve_base_session_for_startup(
+            harness=live_adapter,
+            user_interface_control=user_interface_control,
+            working_directory=live_working_directory,
+            build_shared_window_identifier=lambda _base: live_window_identifier,
+            base_session_identifier_to_resume=None,
+        )
+        assert resolved_base.was_newly_created is True
+        assert resolved_base.shared_window_identifier == live_window_identifier
+    finally:
+        user_interface_control.close_shared_window(live_window_identifier)
 
-    branch = live_adapter.create_branch_session_from_base_session(
+    branch_session_identifier = fork_branch_through_a_real_terminal(
+        live_adapter,
         resolved_base.session_identifier,
         live_working_directory,
-        "[context-handoff branch seed] (process seed, ignore this)",
+        "Reply with only the word acknowledged.",
     )
-    assert os.path.exists(branch.transcript_path)
+    assert os.path.exists(
+        build_transcript_file_path(
+            branch_session_identifier,
+            live_working_directory,
+            DEFAULT_CLAUDE_PROJECTS_ROOT_DIRECTORY,
+        )
+    )
 
 
 def test_live_base_session_transcript_exists_after_creation(
@@ -184,30 +287,36 @@ def test_live_successive_submissions_accumulate_in_the_base_transcript(
 def test_live_branch_creation_produces_a_durable_transcript(
     live_adapter, live_base_session_identifier, live_working_directory
 ) -> None:
-    """The claim the whole design rests on: a fork exists on disk immediately."""
-    branch = live_adapter.create_branch_session_from_base_session(
-        base_session_identifier=live_base_session_identifier,
-        working_directory=live_working_directory,
-        branch_seed_prompt_text=(
-            "[context-handoff branch seed] (process seed, ignore this)"
-        ),
+    """A fork reaches disk once its own visible turn has answered the seed."""
+    branch_session_identifier = fork_branch_through_a_real_terminal(
+        live_adapter,
+        live_base_session_identifier,
+        live_working_directory,
+        "Reply with only the word acknowledged.",
     )
-    assert branch.session_identifier != live_base_session_identifier
-    assert os.path.exists(branch.transcript_path)
+    assert branch_session_identifier != live_base_session_identifier
+    assert os.path.exists(
+        build_transcript_file_path(
+            branch_session_identifier,
+            live_working_directory,
+            DEFAULT_CLAUDE_PROJECTS_ROOT_DIRECTORY,
+        )
+    )
 
 
 def test_live_branch_inherits_the_base_session_context(
     live_adapter, live_base_session_identifier, live_working_directory
 ) -> None:
     """A fork that did not carry the base's context would make the design moot."""
-    branch = live_adapter.create_branch_session_from_base_session(
+    branch_session_identifier = fork_branch_through_a_real_terminal(
+        live_adapter,
         live_base_session_identifier,
         live_working_directory,
-        "[context-handoff branch seed] (process seed, ignore this)",
+        "Reply with only the word acknowledged.",
     )
 
     answer = live_adapter.submit_text_to_session_and_await_acknowledgment(
-        session_identifier=branch.session_identifier,
+        session_identifier=branch_session_identifier,
         submitted_text=(
             "What is the project codeword you were told to remember? "
             "Reply with only the codeword."
@@ -226,10 +335,11 @@ def test_live_forking_leaves_the_base_session_unmodified(
         live_base_session_identifier, live_working_directory
     )
 
-    live_adapter.create_branch_session_from_base_session(
+    fork_branch_through_a_real_terminal(
+        live_adapter,
         live_base_session_identifier,
         live_working_directory,
-        "[context-handoff branch seed] (process seed, ignore this)",
+        "Reply with only the word acknowledged.",
     )
 
     assert (
@@ -242,24 +352,26 @@ def test_live_two_branches_of_one_base_are_independent(
     live_adapter, live_base_session_identifier, live_working_directory
 ) -> None:
     """Each turn forks the base afresh, so branches must not share state."""
-    first_branch = live_adapter.create_branch_session_from_base_session(
+    first_branch_session_identifier = fork_branch_through_a_real_terminal(
+        live_adapter,
         live_base_session_identifier,
         live_working_directory,
-        "[context-handoff branch seed] (process seed, ignore this)",
+        "Reply with only the word acknowledged.",
     )
     live_adapter.submit_text_to_session_and_await_acknowledgment(
-        first_branch.session_identifier,
+        first_branch_session_identifier,
         "Remember a second codeword: NARWHAL-3311. Reply with only the word acknowledged.",
         LIVE_SESSION_TIMEOUT_SECONDS,
     )
 
-    second_branch = live_adapter.create_branch_session_from_base_session(
+    second_branch_session_identifier = fork_branch_through_a_real_terminal(
+        live_adapter,
         live_base_session_identifier,
         live_working_directory,
-        "[context-handoff branch seed] (process seed, ignore this)",
+        "Reply with only the word acknowledged.",
     )
     answer = live_adapter.submit_text_to_session_and_await_acknowledgment(
-        second_branch.session_identifier,
+        second_branch_session_identifier,
         "Do you know a codeword containing the word NARWHAL? Answer only yes or no.",
         LIVE_SESSION_TIMEOUT_SECONDS,
     )

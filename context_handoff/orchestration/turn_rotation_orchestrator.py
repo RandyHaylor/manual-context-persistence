@@ -43,6 +43,11 @@ SHARED_WINDOW_STATUS_TEXT_WHILE_UPDATING_BASE = "updating base session..."
 
 DEFAULT_BASE_SESSION_ACKNOWLEDGMENT_TIMEOUT_SECONDS = 180.0
 
+# Generous, because what it waits on is a person's session answering its seed in
+# a terminal, not a call this process drives. Exceeding it is reported, not
+# fatal — see _launch_new_branch_session_in_shared_window.
+DEFAULT_BRANCH_DURABILITY_TIMEOUT_SECONDS = 180.0
+
 
 
 class NoPendingHandoffError(RuntimeError):
@@ -75,6 +80,9 @@ class TurnRotationOrchestrator:
         base_session_acknowledgment_timeout_seconds: float = (
             DEFAULT_BASE_SESSION_ACKNOWLEDGMENT_TIMEOUT_SECONDS
         ),
+        branch_durability_timeout_seconds: float = (
+            DEFAULT_BRANCH_DURABILITY_TIMEOUT_SECONDS
+        ),
         first_branch_session_preamble_text: str = FIRST_BRANCH_SESSION_PREAMBLE_TEXT,
         build_rotated_branch_session_preamble_text: Callable[[str], str] = (
             build_rotated_branch_session_preamble_text
@@ -90,6 +98,7 @@ class TurnRotationOrchestrator:
         self._base_session_acknowledgment_timeout_seconds = (
             base_session_acknowledgment_timeout_seconds
         )
+        self._branch_durability_timeout_seconds = branch_durability_timeout_seconds
         # Injected rather than read here: whether a commit is required is a
         # settings decision, and orchestration only needs the finished text.
         #
@@ -124,35 +133,54 @@ class TurnRotationOrchestrator:
     def _launch_new_branch_session_in_shared_window(
         self, branch_seed_prompt_text: str
     ) -> str:
-        # Recorded before the seed is sent, and marked as being seeded while it
-        # is. The session answers the seed, and with a task in that seed the
-        # answer is the first turn of real work — so waiting until the call
-        # returns would throw that handoff away. Marking it as being seeded is
-        # what still keeps the orchestrator's own words out of the prompt log.
-        branch_creation_result = self._harness.create_branch_session_from_base_session(
-            base_session_identifier=self._base_session_identifier,
-            working_directory=self._project_directory,
-            branch_seed_prompt_text=branch_seed_prompt_text,
-            announce_branch_session_identifier=(
-                self._user_facing_session_registry.begin_seeding_user_facing_session
-            ),
-        )
-        self._user_facing_session_registry.finish_seeding_user_facing_session(
-            branch_creation_result.session_identifier
+        """Fork the branch by opening it, in one command, in the user's window.
+
+        The branch is never created before this runs. An earlier shape created
+        it non-interactively and then opened a second command on the result,
+        which meant the branch had already spent its turn by the time the user
+        could see it — the window was a corpse. Non-interactive mode belongs to
+        the base session alone.
+        """
+        branch_session_identifier = self._harness.allocate_branch_session_identifier()
+
+        # Recorded before the window runs, and marked as being seeded until the
+        # branch is on disk. The branch answers the seed, and with a task in
+        # that seed the answer is the first turn of real work — so waiting for
+        # durability before recording it would throw that handoff away. Marking
+        # it as being seeded is what still keeps the orchestrator's own words
+        # out of the prompt log.
+        self._user_facing_session_registry.begin_seeding_user_facing_session(
+            branch_session_identifier
         )
 
         branch_ordinal = next(self._branch_ordinal_counter)
-        branch_command_line_argv = self._harness.build_interactive_resume_command_line(
-            session_identifier=branch_creation_result.session_identifier,
-            display_name=f"context handoff branch {branch_ordinal}",
+        branch_command_line_argv = (
+            self._harness.build_interactive_branch_fork_command_line(
+                base_session_identifier=self._base_session_identifier,
+                new_branch_session_identifier=branch_session_identifier,
+                branch_seed_prompt_text=branch_seed_prompt_text,
+                display_name=f"context handoff branch {branch_ordinal}",
+            )
         )
         self._user_interface_control.run_command_line_in_shared_window(
             self._shared_window_identifier, branch_command_line_argv
         )
-        self._current_branch_session_identifier = (
-            branch_creation_result.session_identifier
+
+        # Observed, not awaited, and a timeout is not fatal: the window is
+        # already open and usable, so a branch that is slow to write itself to
+        # disk is a reporting problem rather than a reason to tear anything
+        # down. Rotation needs the transcript, not this call, to have succeeded.
+        self._harness.wait_until_session_transcript_is_durable(
+            session_identifier=branch_session_identifier,
+            working_directory=self._project_directory,
+            timeout_seconds=self._branch_durability_timeout_seconds,
         )
-        return branch_creation_result.session_identifier
+        self._user_facing_session_registry.finish_seeding_user_facing_session(
+            branch_session_identifier
+        )
+
+        self._current_branch_session_identifier = branch_session_identifier
+        return branch_session_identifier
 
     def start_first_branch_session(self) -> str:
         """Open the shared window and run the first branch inside it."""

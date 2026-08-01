@@ -57,6 +57,14 @@ class FakeUserInterfaceControlRecordingAllCalls(UserInterfaceControlInterface):
             ("send_interrupt_to_shared_window", interrupt_repeat_count),
         )
 
+    def send_confirmation_keypress_to_shared_window(
+        self, window_identifier: str
+    ) -> None:
+        self._require_open_window(window_identifier)
+        self._append_event(
+            window_identifier, ("send_confirmation_keypress_to_shared_window", None)
+        )
+
     def display_status_line_in_shared_window(
         self, window_identifier: str, status_text: str
     ) -> None:

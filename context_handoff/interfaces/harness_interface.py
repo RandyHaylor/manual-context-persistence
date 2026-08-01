@@ -35,21 +35,11 @@ class HarnessAvailabilityReport:
     detail_text: str
 
 
-@dataclass(frozen=True)
-class SessionCreationResult:
-    """A session that is guaranteed durable on disk when returned.
-
-    Returned by every operation that brings a session into existence — a base
-    session created from a preamble, or a branch forked from a base — because
-    callers need the same two things from all of them.
-
-    ``transcript_path`` is an opaque location owned by the harness; the core
-    treats it as a token to hand back to the harness, never as something to
-    parse.
-    """
-
-    session_identifier: str
-    transcript_path: str
+# There is no SessionCreationResult any more. Nothing in this interface creates
+# a session: every session is now brought into being by a command run in a
+# window, so what a caller gets back is an identifier to watch for rather than a
+# finished session to use. Durability is asked about separately, and answered
+# with a plain yes or no.
 
 
 @dataclass(frozen=True)
@@ -93,35 +83,75 @@ class HarnessInterface(ABC):
         """Return the human-facing name shown for a session, or None if unset."""
 
     @abstractmethod
-    def create_base_session_with_preamble(
-        self, working_directory: str, preamble_text: str
-    ) -> SessionCreationResult:
-        """Create a brand-new session seeded with the base-session preamble.
+    def allocate_base_session_identifier(self) -> str:
+        """Reserve an identifier for a base session not yet created.
 
-        Used once at startup when the user is not resuming an existing base.
-        The returned session must be fully durable on disk before this method
-        returns, so a branch can immediately be forked from it.
+        Same reason as the branch equivalent: the base session is brought into
+        being by a command run in a window, so its identifier must exist before
+        that command can be built.
         """
 
     @abstractmethod
-    def create_branch_session_from_base_session(
+    def build_interactive_base_session_creation_command_line(
+        self,
+        new_base_session_identifier: str,
+        preamble_text: str,
+        display_name: Optional[str] = None,
+    ) -> list[str]:
+        """Return the argv that creates the base session interactively.
+
+        The base session is the one session that afterwards runs entirely
+        without a terminal — but it is created with one, because a harness whose
+        first run in a directory opens a safety prompt can only be answered
+        through a window. Creating it non-interactively skips that prompt
+        instead of answering it, leaving every later interactive launch to
+        stop on it.
+        """
+
+    @abstractmethod
+    def allocate_branch_session_identifier(self) -> str:
+        """Reserve an identifier for a branch that has not been created yet.
+
+        Exists because the branch is brought into being by the command the user
+        watches run, so its identifier has to be known before that command is
+        built. No session is created and nothing is written by this call.
+        """
+
+    @abstractmethod
+    def build_interactive_branch_fork_command_line(
         self,
         base_session_identifier: str,
-        working_directory: str,
+        new_branch_session_identifier: str,
         branch_seed_prompt_text: str,
-        announce_branch_session_identifier: Optional[Callable[[str], None]] = None,
-    ) -> SessionCreationResult:
-        """Fork a new branch session that inherits the base session's context.
+        display_name: Optional[str] = None,
+    ) -> list[str]:
+        """Return the argv that forks a branch AND opens it for the user.
 
-        The base session must be left unmodified. The returned branch must be
-        fully durable on disk before this method returns, so a caller may
-        immediately resume it or fork from it.
+        One command, not two: the fork is created by the same invocation the
+        user sees running in their window. Splitting creation from opening is
+        what produced a branch that had already taken its turn before the user
+        could look at it, so implementations must not create the session ahead
+        of time.
 
-        ``announce_branch_session_identifier`` is called with the new session's
-        identifier before the seed is sent, and must be honoured by every
-        implementation. The seeded session answers the seed, and that reply is
-        the first turn of real work — so a caller that can only learn the
-        identifier from the return value learns it one turn too late.
+        Implementations must not run the branch non-interactively. The branch is
+        the session the user works in; only the base session is ever driven
+        without a terminal.
+        """
+
+    @abstractmethod
+    def wait_until_session_transcript_is_durable(
+        self,
+        session_identifier: str,
+        working_directory: str,
+        timeout_seconds: float,
+    ) -> bool:
+        """Wait for a session to exist on disk, reporting whether it arrived.
+
+        A forked session is not written to disk until it has content, and the
+        content now arrives from an interactive window rather than from a call
+        this process controls — so durability can only be observed, never
+        awaited inline. Returns False on timeout rather than raising: the window
+        is already open and the user can still use it.
         """
 
     @abstractmethod
@@ -138,13 +168,6 @@ class HarnessInterface(ABC):
         does not add such an instruction itself.
         """
 
-    @abstractmethod
-    def build_interactive_resume_command_line(
-        self, session_identifier: str, display_name: Optional[str] = None
-    ) -> list[str]:
-        """Return the argv that opens a session interactively for the user.
-
-        This is the seam that keeps the user-interface layer harness-agnostic:
-        the harness knows how to phrase the command, the user-interface control
-        layer only knows how to run an opaque argv inside a window.
-        """
+    # There is deliberately no "open an existing session interactively" method.
+    # Having one is what allowed a branch to be created by one call and opened
+    # by a later one; the only way to open a branch is to fork it, above.

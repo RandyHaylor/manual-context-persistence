@@ -11,7 +11,6 @@ import itertools
 from typing import Optional
 
 from context_handoff.interfaces.harness_interface import (
-    SessionCreationResult,
     HarnessAvailabilityReport,
     HarnessInterface,
     SessionAcknowledgment,
@@ -42,6 +41,8 @@ class FakeHarnessRecordingAllCalls(HarnessInterface):
         self.submitted_texts_by_session_identifier: dict[str, list[str]] = {}
         self.created_branch_parent_identifiers: list[str] = []
         self.availability_probe_count: int = 0
+        self.durability_waited_session_identifiers: list[str] = []
+        self.durability_wait_result: bool = True
 
     def verify_harness_available_and_authorized(self) -> HarnessAvailabilityReport:
         self.availability_probe_count += 1
@@ -66,45 +67,74 @@ class FakeHarnessRecordingAllCalls(HarnessInterface):
     ) -> Optional[str]:
         return self.display_name_by_session_identifier.get(session_identifier)
 
-    def create_base_session_with_preamble(
-        self, working_directory: str, preamble_text: str
-    ) -> SessionCreationResult:
-        base_session_identifier = (
-            f"fake-base-{next(self._base_identifier_counter)}"
-        )
+    def allocate_base_session_identifier(self) -> str:
+        return f"fake-base-{next(self._base_identifier_counter)}"
+
+    def build_interactive_base_session_creation_command_line(
+        self,
+        new_base_session_identifier: str,
+        preamble_text: str,
+        display_name: Optional[str] = None,
+    ) -> list[str]:
         self.created_base_session_preambles.append(preamble_text)
-        self.submitted_texts_by_session_identifier[base_session_identifier] = [
+        self.submitted_texts_by_session_identifier[new_base_session_identifier] = [
             preamble_text
         ]
-        return SessionCreationResult(
-            session_identifier=base_session_identifier,
-            transcript_path=f"/fake/transcripts/{base_session_identifier}",
-        )
+        command_line_argv = [
+            "fake-harness",
+            "--session-id",
+            new_base_session_identifier,
+        ]
+        if display_name is not None:
+            command_line_argv += ["--name", display_name]
+        command_line_argv.append(preamble_text)
+        return command_line_argv
 
-    def create_branch_session_from_base_session(
+    def allocate_branch_session_identifier(self) -> str:
+        return f"fake-branch-{next(self._branch_identifier_counter)}"
+
+    def build_interactive_branch_fork_command_line(
         self,
         base_session_identifier: str,
-        working_directory: str,
+        new_branch_session_identifier: str,
         branch_seed_prompt_text: str,
-        announce_branch_session_identifier=None,
-    ) -> SessionCreationResult:
+        display_name: Optional[str] = None,
+    ) -> list[str]:
         self.created_branch_parent_identifiers.append(base_session_identifier)
-        branch_session_identifier = (
-            f"fake-branch-{next(self._branch_identifier_counter)}-of-{base_session_identifier}"
-        )
-        # Announced before the seed is recorded, mirroring the real adapter: the
-        # seeded session answers the seed, and that reply is already a handoff.
-        if announce_branch_session_identifier is not None:
-            announce_branch_session_identifier(branch_session_identifier)
         # The seed is recorded against the branch, never against the base: the
         # base session must be left unmodified by a fork.
-        self.submitted_texts_by_session_identifier[branch_session_identifier] = [
+        self.submitted_texts_by_session_identifier[new_branch_session_identifier] = [
             branch_seed_prompt_text
         ]
-        return SessionCreationResult(
-            session_identifier=branch_session_identifier,
-            transcript_path=f"/fake/transcripts/{branch_session_identifier}",
-        )
+        command_line_argv = [
+            "fake-harness",
+            "--resume",
+            base_session_identifier,
+            "--fork-session",
+            "--session-id",
+            new_branch_session_identifier,
+        ]
+        if display_name is not None:
+            command_line_argv += ["--name", display_name]
+        command_line_argv.append(branch_seed_prompt_text)
+        return command_line_argv
+
+    def wait_until_session_transcript_is_durable(
+        self,
+        session_identifier: str,
+        working_directory: str,
+        timeout_seconds: float,
+    ) -> bool:
+        """Durable only once a fork command has actually been built for it.
+
+        Mirrors the real harness, where merely reserving an identifier writes
+        nothing: a session becomes observable on disk only after the window
+        runs the fork and the branch answers its seed.
+        """
+        self.durability_waited_session_identifiers.append(session_identifier)
+        if session_identifier not in self.submitted_texts_by_session_identifier:
+            return False
+        return self.durability_wait_result
 
     def submit_text_to_session_and_await_acknowledgment(
         self,
@@ -121,10 +151,3 @@ class FakeHarnessRecordingAllCalls(HarnessInterface):
             acknowledgment_text=self._acknowledgment_text, timed_out=False
         )
 
-    def build_interactive_resume_command_line(
-        self, session_identifier: str, display_name: Optional[str] = None
-    ) -> list[str]:
-        command_line_argv = ["fake-harness", "--resume", session_identifier]
-        if display_name is not None:
-            command_line_argv += ["--name", display_name]
-        return command_line_argv

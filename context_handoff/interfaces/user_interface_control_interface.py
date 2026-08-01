@@ -51,6 +51,18 @@ class UserInterfaceControlInterface(ABC):
         """
 
     @abstractmethod
+    def send_confirmation_keypress_to_shared_window(
+        self, window_identifier: str
+    ) -> None:
+        """Accept whatever prompt the program in the window is waiting on.
+
+        Exists for the safety prompt an interactive harness opens with the first
+        time it runs somewhere: nothing can proceed until it is answered, and
+        its default choice is the one that proceeds. Sent blind, because a
+        program with no prompt open simply discards it.
+        """
+
+    @abstractmethod
     def display_status_line_in_shared_window(
         self, window_identifier: str, status_text: str
     ) -> None:

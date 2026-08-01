@@ -198,6 +198,17 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
             ["send-keys", "-t", window_identifier] + ["C-c"] * interrupt_repeat_count
         )
 
+    def send_confirmation_keypress_to_shared_window(
+        self, window_identifier: str
+    ) -> None:
+        self._require_open_window(window_identifier)
+        # Enter alone, with nothing typed ahead of it: the prompt this answers
+        # already has its accepting choice selected, so a keystroke naming that
+        # choice would be a second guess about which option sits where.
+        self._tmux_command_runner.run_tmux_command(
+            ["send-keys", "-t", window_identifier, "Enter"]
+        )
+
     def display_status_line_in_shared_window(
         self, window_identifier: str, status_text: str
     ) -> None:

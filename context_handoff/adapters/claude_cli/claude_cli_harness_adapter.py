@@ -14,11 +14,11 @@ limit.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from typing import Callable, Optional
 
 from context_handoff.interfaces.harness_interface import (
-    SessionCreationResult,
     HarnessAvailabilityReport,
     HarnessInterface,
     SessionAcknowledgment,
@@ -40,15 +40,13 @@ from .non_interactive_process_launcher import (
 DEFAULT_CLAUDE_EXECUTABLE_NAME = "claude"
 DEFAULT_AVAILABILITY_PROBE_TIMEOUT_SECONDS = 30.0
 DEFAULT_BRANCH_SEED_TIMEOUT_SECONDS = 180.0
+TRANSCRIPT_DURABILITY_POLL_INTERVAL_SECONDS = 0.5
 
 
-class SessionNotDurableError(RuntimeError):
-    """A session was requested but its transcript never appeared on disk.
-
-    Raised rather than returning the identifier anyway: a session that is not
-    durable fails later, in a subsequent turn, where the cause is far harder to
-    see.
-    """
+# No SessionNotDurableError: nothing in this adapter creates a session any more,
+# so nothing here can fail to create one. A session now comes into being in a
+# window this process does not drive, which makes non-durability something to
+# report (see wait_until_session_transcript_is_durable) rather than to raise.
 
 
 class ClaudeCliHarnessAdapter(HarnessInterface):
@@ -161,88 +159,82 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
             session_identifier, working_directory, self._claude_projects_root_directory
         )
 
-    def create_base_session_with_preamble(
-        self, working_directory: str, preamble_text: str
-    ) -> SessionCreationResult:
-        base_session_identifier = self._generate_branch_session_identifier()
-        base_creation_argv = [
-            self._claude_executable_name,
-            "-p",
-            "--session-id",
-            base_session_identifier,
-            preamble_text,
-        ]
-        self._collect_stdout_lines_reporting_timeout(
-            base_creation_argv,
-            "",
-            DEFAULT_BRANCH_SEED_TIMEOUT_SECONDS,
-            working_directory=working_directory,
-        )
-        return self._require_durable_session_transcript(
-            base_session_identifier,
-            working_directory,
-            description_for_error="base session seeded with a preamble",
-        )
+    def allocate_base_session_identifier(self) -> str:
+        return self._generate_branch_session_identifier()
 
-    def _require_durable_session_transcript(
+    def build_interactive_base_session_creation_command_line(
         self,
-        session_identifier: str,
-        working_directory: str,
-        description_for_error: str,
-    ) -> SessionCreationResult:
-        """Return the session's location, or raise if it never materialized."""
-        transcript_path = build_transcript_file_path(
-            session_identifier, working_directory, self._claude_projects_root_directory
-        )
-        if not os.path.exists(transcript_path):
-            raise SessionNotDurableError(
-                f"{description_for_error} ({session_identifier}) produced no "
-                f"transcript at {transcript_path}"
-            )
-        return SessionCreationResult(
-            session_identifier=session_identifier, transcript_path=transcript_path
-        )
+        new_base_session_identifier: str,
+        preamble_text: str,
+        display_name: Optional[str] = None,
+    ) -> list[str]:
+        """A plain interactive session with a fixed identifier and a first prompt.
 
-    def create_branch_session_from_base_session(
+        No ``--resume``, because there is nothing yet to resume from, and no
+        ``-p``, because this launch exists partly to let the workspace-trust
+        prompt be answered — which non-interactive mode skips rather than
+        answers.
+        """
+        command_argv = [
+            self._claude_executable_name,
+            "--session-id",
+            new_base_session_identifier,
+        ]
+        if display_name is not None:
+            command_argv += ["--name", display_name]
+        # Last, so a preamble beginning with a dash cannot be read as a flag.
+        command_argv.append(preamble_text)
+        return command_argv
+
+    def allocate_branch_session_identifier(self) -> str:
+        return self._generate_branch_session_identifier()
+
+    def build_interactive_branch_fork_command_line(
         self,
         base_session_identifier: str,
-        working_directory: str,
+        new_branch_session_identifier: str,
         branch_seed_prompt_text: str,
-        announce_branch_session_identifier: Optional[Callable[[str], None]] = None,
-    ) -> SessionCreationResult:
-        branch_session_identifier = self._generate_branch_session_identifier()
-        # Announced before the seed is sent, never after: the seeded session
-        # answers the seed, and that reply is already a handoff.
-        if announce_branch_session_identifier is not None:
-            announce_branch_session_identifier(branch_session_identifier)
-        branch_creation_argv = [
+        display_name: Optional[str] = None,
+    ) -> list[str]:
+        """One interactive command that both forks the branch and opens it.
+
+        Note what is absent: ``-p``. This project reserves non-interactive mode
+        for updating the base session, which nobody watches. A branch is the
+        session the user works in, so it must come up as a real terminal UI,
+        and the seed rides along as the prompt argument that its first visible
+        turn answers.
+        """
+        command_argv = [
             self._claude_executable_name,
             "--resume",
             base_session_identifier,
             "--fork-session",
             "--session-id",
-            branch_session_identifier,
-            # The seed is what forces the fork's transcript to materialize; a
-            # forked session with no content is not written to disk, so a
-            # seedless fork could not be resumed afterwards.
-            "-p",
-            branch_seed_prompt_text,
+            new_branch_session_identifier,
         ]
-        # The child must run in the project directory: the CLI keys a
-        # session's transcript to where it was launched, so a fork created
-        # elsewhere would be invisible to the durability check below.
-        self._collect_stdout_lines_reporting_timeout(
-            branch_creation_argv,
-            "",
-            DEFAULT_BRANCH_SEED_TIMEOUT_SECONDS,
-            working_directory=working_directory,
-        )
+        if display_name is not None:
+            command_argv += ["--name", display_name]
+        # Positional, and last: the CLI takes the prompt as a bare argument, and
+        # keeping it at the end means the seed can never be read as a flag value.
+        command_argv.append(branch_seed_prompt_text)
+        return command_argv
 
-        return self._require_durable_session_transcript(
-            branch_session_identifier,
-            working_directory,
-            description_for_error=f"branch forked from {base_session_identifier}",
+    def wait_until_session_transcript_is_durable(
+        self,
+        session_identifier: str,
+        working_directory: str,
+        timeout_seconds: float,
+    ) -> bool:
+        transcript_path = build_transcript_file_path(
+            session_identifier, working_directory, self._claude_projects_root_directory
         )
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            if os.path.exists(transcript_path):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(TRANSCRIPT_DURABILITY_POLL_INTERVAL_SECONDS)
 
     def submit_text_to_session_and_await_acknowledgment(
         self,
@@ -275,14 +267,3 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
             timed_out=timed_out,
         )
 
-    def build_interactive_resume_command_line(
-        self, session_identifier: str, display_name: Optional[str] = None
-    ) -> list[str]:
-        command_argv = [
-            self._claude_executable_name,
-            "--resume",
-            session_identifier,
-        ]
-        if display_name is not None:
-            command_argv += ["--name", display_name]
-        return command_argv

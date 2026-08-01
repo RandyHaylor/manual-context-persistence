@@ -14,7 +14,6 @@ import os
 import pytest
 
 from context_handoff.adapters.claude_cli.claude_cli_harness_adapter import (
-    SessionNotDurableError,
     ClaudeCliHarnessAdapter,
 )
 from context_handoff.adapters.claude_cli.claude_cli_transcript_locator import (
@@ -166,90 +165,153 @@ def test_submission_timeout_is_reported_with_partial_text(tmp_path) -> None:
     assert "partial ack" in acknowledgment.acknowledgment_text
 
 
-def test_branch_creation_argv_forks_the_base_into_a_new_session(tmp_path) -> None:
-    projects_root_directory = str(tmp_path)
-    process_launcher = FakeNonInteractiveProcessLauncher(
-        stdout_lines_to_yield=[build_result_event_line("seeded")],
-        on_launch_side_effect=make_transcript_appear_on_launch(projects_root_directory),
-    )
+def test_branch_fork_command_line_forks_the_base_into_a_new_session(tmp_path) -> None:
     adapter = ClaudeCliHarnessAdapter(
-        process_launcher=process_launcher,
-        claude_projects_root_directory=projects_root_directory,
+        process_launcher=FakeNonInteractiveProcessLauncher(),
+        claude_projects_root_directory=str(tmp_path),
     )
 
-    branch = adapter.create_branch_session_from_base_session(
+    branch_session_identifier = adapter.allocate_branch_session_identifier()
+    command_argv = adapter.build_interactive_branch_fork_command_line(
         base_session_identifier="base-session",
-        working_directory=WORKING_DIRECTORY_UNDER_TEST,
+        new_branch_session_identifier=branch_session_identifier,
         branch_seed_prompt_text="[branch seed]",
+        display_name="context branch",
     )
 
-    recorded_argv = process_launcher.recorded_launches[0].command_argv
-    assert "--resume" in recorded_argv
-    assert "base-session" in recorded_argv
-    # --fork-session is what leaves the base untouched; without it the seed
-    # would be appended to the base session instead.
-    assert "--fork-session" in recorded_argv
-    assert "--session-id" in recorded_argv
-    assert branch.session_identifier in recorded_argv
-    assert branch.session_identifier != "base-session"
+    assert command_argv == [
+        "claude",
+        "--resume",
+        "base-session",
+        "--fork-session",
+        "--session-id",
+        branch_session_identifier,
+        "--name",
+        "context branch",
+        "[branch seed]",
+    ]
+    assert branch_session_identifier != "base-session"
 
 
-def test_branch_creation_seeds_the_fork_so_its_transcript_materializes(tmp_path) -> None:
-    """A forked session's transcript is not written until it has content."""
-    projects_root_directory = str(tmp_path)
-    process_launcher = FakeNonInteractiveProcessLauncher(
-        stdout_lines_to_yield=[build_result_event_line("seeded")],
-        on_launch_side_effect=make_transcript_appear_on_launch(projects_root_directory),
-    )
-    adapter = ClaudeCliHarnessAdapter(
-        process_launcher=process_launcher,
-        claude_projects_root_directory=projects_root_directory,
-    )
+def test_branch_fork_command_line_launches_no_process_of_its_own(tmp_path) -> None:
+    """Building the branch command must not create the branch.
 
-    branch = adapter.create_branch_session_from_base_session(
-        "base-session", WORKING_DIRECTORY_UNDER_TEST, "[branch seed]"
-    )
-
-    recorded_argv = process_launcher.recorded_launches[0].command_argv
-    assert "-p" in recorded_argv
-    assert os.path.exists(branch.transcript_path)
-
-
-def test_branch_creation_fails_loudly_when_the_transcript_never_appears(tmp_path) -> None:
-    """Returning a non-durable branch would break the next turn, not this one."""
-    process_launcher = FakeNonInteractiveProcessLauncher(
-        stdout_lines_to_yield=[build_result_event_line("seeded")]
-    )
+    The window the user watches is what runs this argv. An adapter that also
+    ran it here would produce the very thing this design removed: a branch that
+    has already taken its turn before anybody can see it.
+    """
+    process_launcher = FakeNonInteractiveProcessLauncher()
     adapter = ClaudeCliHarnessAdapter(
         process_launcher=process_launcher,
         claude_projects_root_directory=str(tmp_path),
     )
 
-    with pytest.raises(SessionNotDurableError):
-        adapter.create_branch_session_from_base_session(
-            "base-session", WORKING_DIRECTORY_UNDER_TEST, "[branch seed]"
-        )
-
-
-def test_branch_creation_runs_in_the_requested_working_directory(tmp_path) -> None:
-    """The CLI keys a transcript to the launch directory, not the caller's cwd."""
-    projects_root_directory = str(tmp_path)
-    process_launcher = FakeNonInteractiveProcessLauncher(
-        stdout_lines_to_yield=[build_result_event_line("seeded")],
-        on_launch_side_effect=make_transcript_appear_on_launch(projects_root_directory),
+    adapter.build_interactive_branch_fork_command_line(
+        base_session_identifier="base-session",
+        new_branch_session_identifier=adapter.allocate_branch_session_identifier(),
+        branch_seed_prompt_text="[branch seed]",
     )
+
+    assert process_launcher.recorded_launches == []
+
+
+def test_branch_fork_command_line_is_never_headless(tmp_path) -> None:
     adapter = ClaudeCliHarnessAdapter(
-        process_launcher=process_launcher,
-        claude_projects_root_directory=projects_root_directory,
+        process_launcher=FakeNonInteractiveProcessLauncher(),
+        claude_projects_root_directory=str(tmp_path),
     )
 
-    adapter.create_branch_session_from_base_session(
-        "base-session", WORKING_DIRECTORY_UNDER_TEST, "[branch seed]"
+    command_argv = adapter.build_interactive_branch_fork_command_line(
+        base_session_identifier="base-session",
+        new_branch_session_identifier=adapter.allocate_branch_session_identifier(),
+        branch_seed_prompt_text="[branch seed]",
+    )
+
+    assert "-p" not in command_argv
+    assert "--print" not in command_argv
+
+
+def test_branch_fork_command_line_omits_the_name_flag_when_unnamed(tmp_path) -> None:
+    adapter = ClaudeCliHarnessAdapter(
+        process_launcher=FakeNonInteractiveProcessLauncher(),
+        claude_projects_root_directory=str(tmp_path),
+    )
+
+    command_argv = adapter.build_interactive_branch_fork_command_line(
+        base_session_identifier="base-session",
+        new_branch_session_identifier="branch-session",
+        branch_seed_prompt_text="[branch seed]",
+    )
+
+    assert command_argv == [
+        "claude",
+        "--resume",
+        "base-session",
+        "--fork-session",
+        "--session-id",
+        "branch-session",
+        "[branch seed]",
+    ]
+
+
+def test_branch_seed_is_the_last_argument_so_it_cannot_be_read_as_a_flag_value(
+    tmp_path,
+) -> None:
+    """A seed that begins with a dash must still be the prompt, not an option."""
+    adapter = ClaudeCliHarnessAdapter(
+        process_launcher=FakeNonInteractiveProcessLauncher(),
+        claude_projects_root_directory=str(tmp_path),
+    )
+
+    command_argv = adapter.build_interactive_branch_fork_command_line(
+        base_session_identifier="base-session",
+        new_branch_session_identifier="branch-session",
+        branch_seed_prompt_text="next_action: do the thing",
+        display_name="context branch",
+    )
+
+    assert command_argv[-1] == "next_action: do the thing"
+
+
+def test_durability_wait_reports_false_when_the_transcript_never_appears(
+    tmp_path,
+) -> None:
+    """A slow branch is reported, not fatal: its window is already open."""
+    adapter = ClaudeCliHarnessAdapter(
+        process_launcher=FakeNonInteractiveProcessLauncher(),
+        claude_projects_root_directory=str(tmp_path),
     )
 
     assert (
-        process_launcher.recorded_launches[0].working_directory
-        == WORKING_DIRECTORY_UNDER_TEST
+        adapter.wait_until_session_transcript_is_durable(
+            session_identifier="branch-session",
+            working_directory=WORKING_DIRECTORY_UNDER_TEST,
+            timeout_seconds=0.0,
+        )
+        is False
+    )
+
+
+def test_durability_wait_reports_true_once_the_transcript_exists(tmp_path) -> None:
+    projects_root_directory = str(tmp_path)
+    adapter = ClaudeCliHarnessAdapter(
+        process_launcher=FakeNonInteractiveProcessLauncher(),
+        claude_projects_root_directory=projects_root_directory,
+    )
+    transcript_path = build_transcript_file_path(
+        "branch-session", WORKING_DIRECTORY_UNDER_TEST, projects_root_directory
+    )
+    os.makedirs(os.path.dirname(transcript_path), exist_ok=True)
+    with open(transcript_path, "w", encoding="utf-8") as transcript_file:
+        transcript_file.write("{}\n")
+
+    assert (
+        adapter.wait_until_session_transcript_is_durable(
+            session_identifier="branch-session",
+            working_directory=WORKING_DIRECTORY_UNDER_TEST,
+            timeout_seconds=0.0,
+        )
+        is True
     )
 
 
@@ -309,27 +371,48 @@ def test_availability_probe_reports_unavailable_when_the_cli_is_missing(tmp_path
     assert report.is_authorized is None
 
 
-def test_interactive_command_line_omits_the_name_flag_when_unnamed(tmp_path) -> None:
+def test_the_only_non_interactive_launch_is_the_base_session_update(tmp_path) -> None:
+    """Where `-p` is allowed to appear, stated as an assertion rather than a comment.
+
+    Updating the base session is the one thing nobody watches, so it is the one
+    thing that may run without a terminal. Everything a user works in must come
+    up as a real session, which is what this pins: if a future change reaches
+    for `-p` again to make some other step tidier, this fails.
+    """
+    process_launcher = FakeNonInteractiveProcessLauncher(
+        stdout_lines_to_yield=[build_result_event_line("ok")]
+    )
+    adapter = ClaudeCliHarnessAdapter(
+        process_launcher=process_launcher,
+        claude_projects_root_directory=str(tmp_path),
+        project_working_directory=WORKING_DIRECTORY_UNDER_TEST,
+    )
+
+    adapter.build_interactive_base_session_creation_command_line(
+        new_base_session_identifier="base-session", preamble_text="preamble"
+    )
+    adapter.build_interactive_branch_fork_command_line(
+        base_session_identifier="base-session",
+        new_branch_session_identifier="branch-session",
+        branch_seed_prompt_text="seed",
+    )
+    adapter.verify_harness_available_and_authorized()
+    # Neither builder launches anything, so only the probe has run so far.
+    assert all(
+        "-p" not in launch.command_argv
+        for launch in process_launcher.recorded_launches
+    )
+
+    adapter.submit_text_to_session_and_await_acknowledgment(
+        "base-session", "handoff", 30.0
+    )
+
+    assert "-p" in process_launcher.recorded_launches[-1].command_argv
+
+
+def test_adapter_offers_no_way_to_open_a_session_without_forking(tmp_path) -> None:
     adapter = ClaudeCliHarnessAdapter(
         process_launcher=FakeNonInteractiveProcessLauncher(),
         claude_projects_root_directory=str(tmp_path),
     )
-    command_argv = adapter.build_interactive_resume_command_line("some-session")
-    assert command_argv == ["claude", "--resume", "some-session"]
-
-
-def test_interactive_command_line_includes_the_name_flag_when_named(tmp_path) -> None:
-    adapter = ClaudeCliHarnessAdapter(
-        process_launcher=FakeNonInteractiveProcessLauncher(),
-        claude_projects_root_directory=str(tmp_path),
-    )
-    command_argv = adapter.build_interactive_resume_command_line(
-        "some-session", display_name="context branch"
-    )
-    assert command_argv == [
-        "claude",
-        "--resume",
-        "some-session",
-        "--name",
-        "context branch",
-    ]
+    assert not hasattr(adapter, "build_interactive_resume_command_line")

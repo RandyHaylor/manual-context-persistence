@@ -85,6 +85,15 @@ class OrchestratorTestHarness:
             ]
         ]
 
+    def command_lines_run_in_window(self) -> list[tuple]:
+        return [
+            event[1]
+            for event in self.fake_user_interface_control.event_log_by_window_identifier[
+                WINDOW_IDENTIFIER
+            ]
+            if event[0] == "run_command_line_in_shared_window"
+        ]
+
 
 @pytest.fixture
 def test_harness(tmp_path) -> OrchestratorTestHarness:
@@ -104,6 +113,76 @@ def test_starting_opens_the_window_and_runs_a_branch_in_it(test_harness) -> None
     assert branch_session_identifier
 
 
+def test_the_window_runs_the_fork_itself_and_never_a_headless_branch(
+    test_harness,
+) -> None:
+    """The regression this whole seam exists for.
+
+    The branch the user works in must be brought into being by the command
+    running in their window. An earlier shape forked it non-interactively first
+    and then opened a second command on the finished session, so every window
+    after the first was interrupted about a second after it appeared — the
+    branch had already spent its turn where nobody could see it.
+    """
+    test_harness.orchestrator.start_first_branch_session()
+
+    command_lines = test_harness.command_lines_run_in_window()
+    assert len(command_lines) == 1, "the branch must be opened exactly once"
+    launched_argv = command_lines[0]
+    assert "--fork-session" in launched_argv, (
+        "the window's own command must be what forks the branch"
+    )
+    assert "-p" not in launched_argv
+    assert "--print" not in launched_argv
+
+
+def test_every_rotation_opens_a_forking_command_not_only_the_first(
+    test_harness,
+) -> None:
+    """The first branch was never the broken one; the ones after it were."""
+    first_branch = test_harness.orchestrator.start_first_branch_session()
+    test_harness.stage_completed_turn(first_branch)
+    test_harness.orchestrator.rotate_to_next_branch_session()
+
+    command_lines = test_harness.command_lines_run_in_window()
+    assert len(command_lines) == 2
+    for launched_argv in command_lines:
+        assert "--fork-session" in launched_argv
+        assert "-p" not in launched_argv
+
+
+def test_the_branch_is_not_on_disk_before_its_window_command_runs(
+    test_harness,
+) -> None:
+    """Allocation must not create the session; the visible command does."""
+    branch_session_identifier = (
+        test_harness.fake_harness.allocate_branch_session_identifier()
+    )
+
+    assert (
+        test_harness.fake_harness.wait_until_session_transcript_is_durable(
+            session_identifier=branch_session_identifier,
+            working_directory="/anywhere",
+            timeout_seconds=0.0,
+        )
+        is False
+    )
+
+
+def test_a_branch_that_never_becomes_durable_still_leaves_the_window_open(
+    test_harness,
+) -> None:
+    """A slow branch is a reporting problem, not a reason to tear down."""
+    test_harness.fake_harness.durability_wait_result = False
+
+    branch_session_identifier = test_harness.orchestrator.start_first_branch_session()
+
+    assert branch_session_identifier
+    assert test_harness.fake_user_interface_control.is_shared_window_alive(
+        WINDOW_IDENTIFIER
+    )
+
+
 class FakeHarnessCheckingTheRegistryWhileItSeeds(FakeHarnessRecordingAllCalls):
     """Answers, at seed time, the two questions the hooks will ask.
 
@@ -119,29 +198,29 @@ class FakeHarnessCheckingTheRegistryWhileItSeeds(FakeHarnessRecordingAllCalls):
         self.was_user_facing_while_seeding: list = []
         self.was_accepting_user_prompts_while_seeding: list = []
 
-    def create_branch_session_from_base_session(
+    def wait_until_session_transcript_is_durable(
         self,
-        base_session_identifier: str,
+        session_identifier: str,
         working_directory: str,
-        branch_seed_prompt_text: str,
-        announce_branch_session_identifier=None,
-    ):
-        def record_what_the_registry_says(branch_session_identifier: str) -> None:
-            if announce_branch_session_identifier is not None:
-                announce_branch_session_identifier(branch_session_identifier)
-            registry = UserFacingSessionRegistry(self._project_directory)
-            self.was_user_facing_while_seeding.append(
-                registry.is_user_facing_session(branch_session_identifier)
-            )
-            self.was_accepting_user_prompts_while_seeding.append(
-                registry.is_session_accepting_user_prompts(branch_session_identifier)
-            )
+        timeout_seconds: float,
+    ) -> bool:
+        """The durability wait IS the seeding window now.
 
-        return super().create_branch_session_from_base_session(
-            base_session_identifier=base_session_identifier,
+        The branch answers its seed inside the user's window while this call
+        watches for the transcript, so this is the moment the hooks' questions
+        get asked — after it returns, seeding is over.
+        """
+        registry = UserFacingSessionRegistry(self._project_directory)
+        self.was_user_facing_while_seeding.append(
+            registry.is_user_facing_session(session_identifier)
+        )
+        self.was_accepting_user_prompts_while_seeding.append(
+            registry.is_session_accepting_user_prompts(session_identifier)
+        )
+        return super().wait_until_session_transcript_is_durable(
+            session_identifier=session_identifier,
             working_directory=working_directory,
-            branch_seed_prompt_text=branch_seed_prompt_text,
-            announce_branch_session_identifier=record_what_the_registry_says,
+            timeout_seconds=timeout_seconds,
         )
 
 
