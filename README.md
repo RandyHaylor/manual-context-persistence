@@ -57,8 +57,13 @@ unattended), opens the shared tmux window with the first branch inside it, then
 watches for completed turns and rotates. `Ctrl-C` stops the loop and leaves the
 window open, since the user may still be mid-conversation in it.
 
-Starting without the capture hooks looks fine and captures nothing, so the
-preflight refuses rather than warns. `--skip-hook-preflight` overrides it.
+Each hook is the only writer of a file the loop depends on, so losing either is
+an error state rather than a degraded run. Without the `Stop` hook nothing writes
+`context-to-keep.json`, so the loop's poll never sees a handoff and it idles
+indefinitely — no rotation, no error. Without the `UserPromptSubmit` hook it does
+rotate, but every handoff reaches the base session with none of the prompts that
+produced it. There is no flag that starts either run: the hooks are installed, or
+the run stops.
 
 ## Layout
 
@@ -101,18 +106,22 @@ OAuth flow. Nothing in this project prompts for, stores, or manages credentials.
 
 ## The handoff package
 
-At the end of a turn the agent emits a fenced block. The Stop hook finds it and
-writes it to `.claude/context-to-keep.json`:
+Once a session has done work worth saving, the agent emits a fenced block. The
+Stop hook finds it and writes it to
+`.claude/manual-context-persistence/context-to-keep.json`:
 
 ````markdown
 ```context-to-keep
 {
   "context_to_keep_version": 1,
-  "summary_of_work_completed_this_turn": "What this turn accomplished.",
-  "context_to_carry_forward": ["A fact the next turn needs."]
+  "context_to_keep": ["A fact the next turn needs."]
 }
 ```
 ````
+
+Emission is triggered by having done work worth saving, not by a turn ending: a
+question or an acknowledgement would otherwise cost a full rotation to carry
+nothing.
 
 The last valid block in a reply wins, so an agent may quote the format before
 emitting the real thing. A malformed package is ignored rather than raising —
@@ -120,10 +129,20 @@ no hook may be the reason a session breaks.
 
 ## Files the system uses
 
+Everything this system keeps lives in its own folder, named for this
+repository, so nothing it writes can collide with a file the harness or another
+tool puts in `.claude`. Only `settings.local.json` sits outside it, because the
+harness reads hook registrations from there.
+
 ```
-.claude/context-to-keep.json                                  pending handoff
-.claude/context-to-keep-history/context-to-keep-<stamp>.json  consumed handoffs
-.claude/user-prompt-log.json                                  verbatim prompts
+.claude/settings.local.json                        hook registrations (harness reads this)
+.claude/manual-context-persistence/
+  settings.json                                    this system's settings
+  context-to-keep.json                             pending handoff
+  context-to-keep-history/context-to-keep-<stamp>.json  consumed handoffs
+  user-prompt-log.json                             verbatim prompts
+  user-facing-sessions.json                        which sessions the user typed in
+  last-stop-hook-outcome.json                      what the Stop hook decided last
 ```
 
 Prompts are logged byte for byte, with up to 2000 characters of the preceding
@@ -133,13 +152,43 @@ the transcript on the next submission — scoped to the gap since the previous
 prompt, so nothing is logged twice and a forked transcript's inherited history
 is never rescanned.
 
-## Hooks
+## Settings
 
-Register in a project's `.claude/settings.local.json`:
+`.claude/manual-context-persistence/settings.json` is created with defaults on
+first run:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `require_git_commit` | `false` | Ask each session to commit its work before emitting the block |
+| `git_repository_url` | `null` | The repository's remote, when it has one |
+| `git_repository_is_local_only` | `false` | Stated rather than inferred, so "no remote" and "not filled in yet" stay distinct |
+
+Every default is safe for a project with no repository at all, which is why
+`require_git_commit` is off: a commit instruction in a directory with no
+repository is unfollowable.
+
+`--require-git-commit` / `--no-require-git-commit` override the file for one run.
+
+## Hooks
 
 | Event | Script |
 |---|---|
-| `Stop` | `hooks/context_to_keep_stop_hook.py` |
-| `UserPromptSubmit` | `hooks/user_prompt_submit_capture_hook.py` |
+| `Stop` | `context_to_keep_stop_hook.py` |
+| `UserPromptSubmit` | `user_prompt_submit_capture_hook.py` |
 
-Both read a JSON payload on stdin and print a JSON response.
+The harness runs these, so a project's `.claude/settings.local.json` has to name
+an absolute path to each one. That path is **not** into this repository — the
+scripts are deployed to `~/.claude/manual-context-persistence/hooks/` and
+referenced there, so a project's settings file keeps working when this repository
+is moved or renamed. Startup redeploys both scripts on every run, overwriting
+what is there, so the deployed copies are always the ones this repository
+currently holds — and a deleted or hand-edited copy needs no separate handling.
+
+Startup sets this up, and the difference between the two cases is whose file it
+is. No `settings.local.json` at all means nothing of the operator's exists yet,
+so it is created without asking. One that is already there but does not register
+these hooks is theirs, so startup asks whether to install them or abort, and
+installing merges — other keys and other tools' hooks on the same event are left
+as they were. Declining stops the run; there is no way to start without them.
+
+Both hooks read a JSON payload on stdin and print a JSON response.

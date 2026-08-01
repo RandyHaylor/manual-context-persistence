@@ -50,7 +50,7 @@ class HookRegistrationReport:
 def build_project_settings_path(project_directory: str) -> str:
     return (
         ProjectStateDirectory(project_directory)
-        .json_document(PROJECT_SETTINGS_FILE_NAME)
+        .harness_json_document(PROJECT_SETTINGS_FILE_NAME)
         .file_path
     )
 
@@ -79,7 +79,7 @@ def _event_registers_script(
 def inspect_hook_registration_for_project(
     project_directory: str,
 ) -> HookRegistrationReport:
-    settings_document = ProjectStateDirectory(project_directory).json_document(
+    settings_document = ProjectStateDirectory(project_directory).harness_json_document(
         PROJECT_SETTINGS_FILE_NAME
     )
     settings_path = settings_document.file_path

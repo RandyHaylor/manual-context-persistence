@@ -19,15 +19,15 @@ from __future__ import annotations
 
 from context_handoff.project_state.project_state_directory import ProjectStateDirectory
 
-USER_FACING_SESSION_REGISTRY_FILE_NAME = "context-handoff-user-facing-sessions.json"
+USER_FACING_SESSION_REGISTRY_FILE_NAME = "user-facing-sessions.json"
 REGISTERED_SESSION_IDENTIFIERS_FIELD_NAME = "user_facing_session_identifiers"
 
 
 class UserFacingSessionRegistry:
     def __init__(self, project_directory: str) -> None:
-        self._registry_document = ProjectStateDirectory(project_directory).json_document(
-            USER_FACING_SESSION_REGISTRY_FILE_NAME
-        )
+        self._registry_document = ProjectStateDirectory(
+            project_directory
+        ).application_json_document(USER_FACING_SESSION_REGISTRY_FILE_NAME)
 
     @property
     def registry_file_path(self) -> str:

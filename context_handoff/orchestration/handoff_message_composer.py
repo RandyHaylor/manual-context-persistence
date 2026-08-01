@@ -29,11 +29,8 @@ def compose_handoff_message_for_base_session(
     for entry in user_prompt_entries:
         message_parts.append("User: " + entry.user_prompt_text)
 
-    message_parts.append(
-        "Done: " + context_to_keep_package.summary_of_work_completed_this_turn
-    )
-    for carried_context in context_to_keep_package.context_to_carry_forward:
-        message_parts.append("Keep: " + carried_context)
+    for carried_context in context_to_keep_package.context_to_keep:
+        message_parts.append("Context: " + carried_context)
 
     message_parts.append(ACKNOWLEDGE_ONLY_INSTRUCTION_TEXT)
     return "\n\n".join(message_parts)

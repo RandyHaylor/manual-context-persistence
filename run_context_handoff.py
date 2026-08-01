@@ -4,6 +4,7 @@
     ./run_context_handoff.py                      # asks: new base session, or resume?
     ./run_context_handoff.py --new-base           # skip the question, create one
     ./run_context_handoff.py --resume-base <id>   # skip the question, resume one
+    ./run_context_handoff.py --require-git-commit # override the project's settings.json
 
 This file parses arguments and builds the concrete Claude CLI and tmux
 adapters. Every decision it used to make now lives in
@@ -70,9 +71,14 @@ def parse_command_line_arguments(argv: list[str]) -> argparse.Namespace:
         help="name for the shared window; defaults to one derived from the base session",
     )
     parser.add_argument(
-        "--skip-hook-preflight",
-        action="store_true",
-        help="start even if the project's hooks are not registered",
+        "--require-git-commit",
+        dest="require_git_commit_override",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "require a git commit alongside each handoff; overrides "
+            "require_git_commit in the project's settings.json when passed"
+        ),
     )
     return parser.parse_args(argv[1:])
 
@@ -91,7 +97,13 @@ def main(argv: list[str]) -> int:
                 arguments.create_new_base_session_without_asking
             ),
             shared_window_identifier=arguments.shared_window_identifier,
-            skip_hook_preflight=arguments.skip_hook_preflight,
+            require_git_commit_override=arguments.require_git_commit_override,
+            # Read from here, deployed to a fixed path under the user's home,
+            # and referenced there — so a project's settings file does not point
+            # into this repository and break if it moves.
+            hook_scripts_source_directory=os.path.join(
+                REPOSITORY_ROOT_DIRECTORY, "hooks"
+            ),
         ),
         harness=ClaudeCliHarnessAdapter(
             process_launcher=SubprocessNonInteractiveProcessLauncher(),

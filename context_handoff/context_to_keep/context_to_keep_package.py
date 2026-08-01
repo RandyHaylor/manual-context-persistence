@@ -1,15 +1,19 @@
-"""The handoff package an agent emits at the end of a turn.
+"""The handoff package an agent returns at the end of a turn.
 
-This is the one part of the protocol the agent itself must get right, so the
-shape is deliberately small: what happened this turn, and what the next turn
-needs to know. A turn's full transcript is explicitly not carried — keeping the
-base session compact is the entire point of the design.
+The spec describes one thing: the context the agent returns that it decides is
+all that is needed going forward to understand what was done. So the package is
+that context and nothing else.
+
+An earlier version also carried a summary field. It was invented here, not
+taken from the spec, and across a twenty-turn run it was where narrative
+accumulated — the base session filled with prose about what had happened rather
+than with what a later session needed. It is gone.
 
 Extraction is lenient about surroundings and strict about content. An agent
-reply is prose with a package somewhere inside it, and an agent may quote the
-format before emitting the real thing, so the LAST valid block wins. A
-malformed package yields None rather than raising: the Stop hook that calls
-this must never be the reason a session breaks.
+reply is prose with a block somewhere inside it, and an agent may quote the
+format before emitting the real thing, so the LAST valid block wins. A malformed
+block yields None rather than raising: the Stop hook that calls this must never
+be the reason a session fails.
 """
 from __future__ import annotations
 
@@ -20,6 +24,8 @@ from typing import Any, Optional
 
 CONTEXT_TO_KEEP_PACKAGE_VERSION = 1
 CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG = "context-to-keep"
+CONTEXT_TO_KEEP_FIELD_NAME = "context_to_keep"
+CONTEXT_TO_KEEP_VERSION_FIELD_NAME = "context_to_keep_version"
 
 _FENCED_CONTEXT_TO_KEEP_BLOCK_PATTERN = re.compile(
     r"```" + re.escape(CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG) + r"\s*\n(.*?)```",
@@ -33,16 +39,12 @@ class InvalidContextToKeepPackageError(ValueError):
 
 @dataclass(frozen=True)
 class ContextToKeepPackage:
-    summary_of_work_completed_this_turn: str
-    context_to_carry_forward: list[str] = field(default_factory=list)
+    context_to_keep: list[str] = field(default_factory=list)
 
     def to_json_dictionary(self) -> dict[str, Any]:
         return {
-            "context_to_keep_version": CONTEXT_TO_KEEP_PACKAGE_VERSION,
-            "summary_of_work_completed_this_turn": (
-                self.summary_of_work_completed_this_turn
-            ),
-            "context_to_carry_forward": list(self.context_to_carry_forward),
+            CONTEXT_TO_KEEP_VERSION_FIELD_NAME: CONTEXT_TO_KEEP_PACKAGE_VERSION,
+            CONTEXT_TO_KEEP_FIELD_NAME: list(self.context_to_keep),
         }
 
 
@@ -55,35 +57,33 @@ def parse_context_to_keep_package(
             f"expected a JSON object, got {type(candidate_package_dictionary).__name__}"
         )
 
-    declared_version = candidate_package_dictionary.get("context_to_keep_version")
+    declared_version = candidate_package_dictionary.get(
+        CONTEXT_TO_KEEP_VERSION_FIELD_NAME
+    )
     if declared_version != CONTEXT_TO_KEEP_PACKAGE_VERSION:
         raise InvalidContextToKeepPackageError(
-            f"unsupported context_to_keep_version {declared_version!r}; "
+            f"unsupported {CONTEXT_TO_KEEP_VERSION_FIELD_NAME} {declared_version!r}; "
             f"this build understands {CONTEXT_TO_KEEP_PACKAGE_VERSION}"
         )
 
-    summary_text = candidate_package_dictionary.get(
-        "summary_of_work_completed_this_turn"
-    )
-    if not isinstance(summary_text, str) or not summary_text.strip():
+    if CONTEXT_TO_KEEP_FIELD_NAME not in candidate_package_dictionary:
         raise InvalidContextToKeepPackageError(
-            "summary_of_work_completed_this_turn must be a non-empty string; "
-            "without it the base session cannot tell what the turn did"
+            f"{CONTEXT_TO_KEEP_FIELD_NAME} is required; without it the package "
+            "carries nothing"
         )
 
-    carry_forward_entries = candidate_package_dictionary.get(
-        "context_to_carry_forward", []
-    )
-    if not isinstance(carry_forward_entries, list) or not all(
-        isinstance(entry, str) for entry in carry_forward_entries
+    context_items = candidate_package_dictionary[CONTEXT_TO_KEEP_FIELD_NAME]
+    if not isinstance(context_items, list) or not all(
+        isinstance(item, str) for item in context_items
     ):
         raise InvalidContextToKeepPackageError(
-            "context_to_carry_forward must be a list of strings"
+            f"{CONTEXT_TO_KEEP_FIELD_NAME} must be a list of strings"
         )
 
+    # A blank item carries nothing and would occupy a line in the base session
+    # for the life of the project.
     return ContextToKeepPackage(
-        summary_of_work_completed_this_turn=summary_text.strip(),
-        context_to_carry_forward=list(carry_forward_entries),
+        context_to_keep=[item.strip() for item in context_items if item.strip()]
     )
 
 

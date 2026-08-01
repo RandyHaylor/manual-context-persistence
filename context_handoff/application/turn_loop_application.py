@@ -20,8 +20,14 @@ from context_handoff.interfaces.harness_interface import HarnessInterface
 from context_handoff.interfaces.user_interface_control_interface import (
     UserInterfaceControlInterface,
 )
+from context_handoff.orchestration.branch_session_preamble import (
+    build_branch_session_preamble_text,
+)
 from context_handoff.orchestration.turn_rotation_orchestrator import (
     TurnRotationOrchestrator,
+)
+from context_handoff.project_state.context_handoff_settings_store import (
+    ContextHandoffSettingsStore,
 )
 from context_handoff.startup.base_session_choice_prompt import (
     ask_whether_to_create_or_resume_base_session,
@@ -29,8 +35,18 @@ from context_handoff.startup.base_session_choice_prompt import (
 from context_handoff.startup.base_session_resolver import (
     resolve_base_session_for_startup,
 )
+from context_handoff.startup.hook_installation_choice_prompt import (
+    ask_whether_to_install_missing_hooks,
+)
+from context_handoff.startup.hook_registration_installer import (
+    install_context_handoff_hooks_into_project_settings,
+)
 from context_handoff.startup.hook_registration_preflight import (
+    build_project_settings_path,
     inspect_hook_registration_for_project,
+)
+from context_handoff.startup.hook_script_deployment import (
+    deploy_hook_scripts_overwriting_existing,
 )
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 
@@ -46,10 +62,19 @@ class TurnLoopApplicationRequest:
     """What the operator asked for, independent of how they asked."""
 
     project_directory: str
+    # Where the scripts are read from, which is this repository. They are copied
+    # to one fixed place under the user's home before being referenced, so a
+    # project's settings file never points into the repository itself.
+    hook_scripts_source_directory: str
     base_session_identifier_to_resume: Optional[str] = None
+    # Injectable so a test deploys into a temporary directory rather than into
+    # the developer's own home.
+    deployed_hook_scripts_directory: Optional[str] = None
     create_new_base_session_without_asking: bool = False
     shared_window_identifier: Optional[str] = None
-    skip_hook_preflight: bool = False
+    # None means the operator did not pass the flag, which is not the same as
+    # passing it as false; only a stated value overrides the settings file.
+    require_git_commit_override: Optional[bool] = None
 
 
 def build_shared_window_identifier_for_base_session(base_session_identifier: str) -> str:
@@ -62,6 +87,90 @@ def build_shared_window_identifier_for_base_session(base_session_identifier: str
         SHARED_WINDOW_NAME_PREFIX
         + base_session_identifier[:SHARED_WINDOW_NAME_SESSION_CHARACTERS]
     )
+
+
+def prepare_project_state_and_hooks(
+    request: TurnLoopApplicationRequest,
+    read_answer: Callable[[str], str],
+    write_line: Callable[[str], None],
+) -> bool:
+    """Set up what is missing, ask before touching what is not, or refuse.
+
+    Three cases, and the difference between the first two is whose file it is.
+    No ``settings.local.json`` at all means nothing of the operator's exists yet,
+    so both it and our own folder are created without asking. A file that is
+    already there but does not register our hooks is theirs, so writing into it
+    is a question. Hooks already registered is the ordinary case.
+
+    There is no path that starts the loop without the hooks, because each hook is
+    the only writer of a file the loop depends on, and losing either is an error
+    state rather than a degraded run:
+
+    - No Stop hook: nothing ever writes ``context-to-keep.json``, so the loop's
+      poll never sees a pending handoff and it idles for as long as the session
+      is used. It does not rotate and it does not fail — it silently does
+      nothing.
+    - No UserPromptSubmit hook: rotation still happens, but the prompt log is
+      never written, so every handoff reaches the base session carrying the
+      agent's context and none of what the user asked for.
+
+    So the only answers are to install them or to stop.
+
+    Returns False when the run must not continue.
+    """
+    settings_store = ContextHandoffSettingsStore(request.project_directory)
+    if settings_store.write_default_settings_if_absent():
+        write_line(f"settings: created {settings_store.settings_file_path}")
+    else:
+        write_line(f"settings: {settings_store.settings_file_path}")
+
+    # Before anything looks at or writes a command naming these scripts, make
+    # sure the scripts at that path are the ones this repository currently holds.
+    deployment_result = deploy_hook_scripts_overwriting_existing(
+        hook_scripts_source_directory=request.hook_scripts_source_directory,
+        deployed_hook_scripts_directory=request.deployed_hook_scripts_directory,
+    )
+    write_line(f"hook scripts: {deployment_result.detail_text}")
+
+    hook_report = inspect_hook_registration_for_project(request.project_directory)
+    if hook_report.is_ready_to_run:
+        write_line(f"hooks: {hook_report.detail_text}")
+        return True
+
+    if not hook_report.settings_file_exists:
+        installation_result = install_context_handoff_hooks_into_project_settings(
+            project_directory=request.project_directory,
+            hook_scripts_directory=deployment_result.deployed_hook_scripts_directory,
+        )
+        write_line(f"hooks: {installation_result.detail_text}")
+        return True
+
+    write_line(f"hooks: {hook_report.detail_text}")
+    try:
+        should_install = ask_whether_to_install_missing_hooks(
+            read_answer=read_answer,
+            write_line=write_line,
+            missing_hook_event_names=hook_report.missing_hook_event_names,
+            settings_file_path=build_project_settings_path(request.project_directory),
+        )
+    except EOFError:
+        write_line(
+            "no answer available on stdin; register the capture hooks and start again"
+        )
+        return False
+
+    if not should_install:
+        # A run without capture looks healthy and records nothing, which is the
+        # worst of both, so aborting is the answer rather than continuing.
+        write_line("aborting without installing the capture hooks")
+        return False
+
+    installation_result = install_context_handoff_hooks_into_project_settings(
+        project_directory=request.project_directory,
+        hook_scripts_directory=deployment_result.deployed_hook_scripts_directory,
+    )
+    write_line(f"hooks: {installation_result.detail_text}")
+    return True
 
 
 def run_turn_loop_application(
@@ -78,15 +187,9 @@ def run_turn_loop_application(
         return EXIT_CODE_PREFLIGHT_FAILED
     write_line(f"harness: {availability_report.detail_text}")
 
-    hook_report = inspect_hook_registration_for_project(request.project_directory)
-    write_line(f"hooks: {hook_report.detail_text}")
-    if not hook_report.is_ready_to_run and not request.skip_hook_preflight:
-        # Refuses rather than warns: a run without capture looks healthy and
-        # records nothing, which is the worst of both.
-        write_line(
-            "refusing to start without the capture hooks; pass --skip-hook-preflight "
-            "to override"
-        )
+    if not prepare_project_state_and_hooks(
+        request=request, read_answer=read_answer, write_line=write_line
+    ):
         return EXIT_CODE_PREFLIGHT_FAILED
 
     base_session_identifier_to_resume = request.base_session_identifier_to_resume
@@ -122,6 +225,16 @@ def run_turn_loop_application(
         )
     )
 
+    effective_settings = (
+        ContextHandoffSettingsStore(request.project_directory)
+        .read_settings()
+        .with_require_git_commit_override(request.require_git_commit_override)
+    )
+    write_line(
+        "git commit before handing off: "
+        f"{'required' if effective_settings.require_git_commit else 'not required'}"
+    )
+
     orchestrator = TurnRotationOrchestrator(
         harness=harness,
         user_interface_control=user_interface_control,
@@ -130,6 +243,9 @@ def run_turn_loop_application(
         project_directory=request.project_directory,
         base_session_identifier=resolved_base_session.session_identifier,
         shared_window_identifier=shared_window_identifier,
+        branch_session_preamble_text=build_branch_session_preamble_text(
+            require_git_commit=effective_settings.require_git_commit
+        ),
     )
 
     first_branch_session_identifier = orchestrator.start_first_branch_session()

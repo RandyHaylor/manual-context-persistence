@@ -1,21 +1,13 @@
 """Tests for resolving which base session a run should use, and its preamble.
 
-Spec 2 line 6 asks for one preamble, injected when the base session is created.
-Branches are forked from the base, so they inherit it — there is no second
-instruction layer, and an earlier version that added one is what drove the
-handoffs into writing project encyclopedias.
+The base preamble says only what a session needs in order to use the material
+it is given. The instruction to emit a handoff block is not here — branches emit
+it, so branches are told at fork time.
 """
 from __future__ import annotations
 
-import json
-
 import pytest
 
-from context_handoff.context_to_keep.context_to_keep_package import (
-    CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG,
-    CONTEXT_TO_KEEP_PACKAGE_VERSION,
-    extract_context_to_keep_package_from_agent_response,
-)
 from context_handoff.startup.base_session_resolver import (
     BASE_SESSION_PREAMBLE_TEXT,
     resolve_base_session_for_startup,
@@ -63,45 +55,52 @@ def test_an_empty_identifier_is_rejected_rather_than_treated_as_absent() -> None
         )
 
 
-def test_the_preamble_states_the_handoff_format() -> None:
-    """Branches inherit this, and it is the only place the format is stated."""
-    assert CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG in BASE_SESSION_PREAMBLE_TEXT
-    assert "summary_of_work_completed_this_turn" in BASE_SESSION_PREAMBLE_TEXT
-    assert "context_to_carry_forward" in BASE_SESSION_PREAMBLE_TEXT
-    assert (
-        f'"context_to_keep_version": {CONTEXT_TO_KEEP_PACKAGE_VERSION}'
-        in BASE_SESSION_PREAMBLE_TEXT
-    )
-
-
-def test_the_example_in_the_preamble_parses_as_a_real_package() -> None:
-    """If the worked example does not parse, the format is taught wrong."""
-    extracted = extract_context_to_keep_package_from_agent_response(
-        BASE_SESSION_PREAMBLE_TEXT
-    )
-    assert extracted is not None
-
-
-def test_the_preamble_keeps_recoverable_facts_out_of_the_handoff() -> None:
-    """Spec 1 line 30: no full project memory.
-
-    Without this, carried context fills with file state and script results —
-    things the next session can simply look up — and it grows every turn.
-    """
+def test_the_preamble_says_what_will_arrive_and_what_to_do_with_it() -> None:
     lowercased = BASE_SESSION_PREAMBLE_TEXT.lower()
-    assert "do not" in lowercased
-    assert "reading the files" in lowercased
-    assert "not asked for" in lowercased
+    assert "user messages" in lowercased
+    assert "work notes" in lowercased
+    assert "factor these in" in lowercased
+
+
+def test_the_preamble_does_not_carry_the_block_instruction() -> None:
+    """Branches emit the block, so branches are told about it, not everyone."""
+    assert "context_to_keep" not in BASE_SESSION_PREAMBLE_TEXT
+    assert "```" not in BASE_SESSION_PREAMBLE_TEXT
+
+
+def test_the_preamble_never_describes_the_machinery() -> None:
+    """Every working session inherits this by forking, and reads it."""
+    lowercased = BASE_SESSION_PREAMBLE_TEXT.lower()
+    for machinery_word in (
+        "base session",
+        "branch",
+        "fork",
+        "handoff",
+        "short-lived",
+        "resumed",
+        "acknowledge",
+        "orchestrat",
+        "rotation",
+    ):
+        assert machinery_word not in lowercased, (
+            f"the preamble mentions {machinery_word!r}; every working session reads it"
+        )
+
+
+def test_the_preamble_never_governs_how_the_agent_replies() -> None:
+    """Anything here that shapes replies shapes replies to the user."""
+    lowercased = BASE_SESSION_PREAMBLE_TEXT.lower()
+    for reply_instruction in (
+        "one short sentence",
+        "reply with",
+        "briefly",
+        "be brief",
+        "do nothing else",
+        "and nothing else",
+    ):
+        assert reply_instruction not in lowercased
 
 
 def test_the_preamble_is_short() -> None:
-    """It is inherited by every branch and prepended to the whole project."""
-    assert len(BASE_SESSION_PREAMBLE_TEXT) < 1200
-
-
-def test_the_preamble_is_stable_across_calls() -> None:
-    from context_handoff.startup.base_session_resolver import (
-        BASE_SESSION_PREAMBLE_TEXT as second_read,
-    )
-
-    assert BASE_SESSION_PREAMBLE_TEXT == second_read
+    """It is inherited by every session and prepended to the whole project."""
+    assert len(BASE_SESSION_PREAMBLE_TEXT) < 200

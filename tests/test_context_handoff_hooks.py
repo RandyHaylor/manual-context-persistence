@@ -57,8 +57,7 @@ def build_agent_reply_containing_a_package(summary_text: str) -> str:
     package_json = json.dumps(
         {
             "context_to_keep_version": CONTEXT_TO_KEEP_PACKAGE_VERSION,
-            "summary_of_work_completed_this_turn": summary_text,
-            "context_to_carry_forward": ["a fact worth keeping"],
+            "context_to_keep": [summary_text],
         }
     )
     return (

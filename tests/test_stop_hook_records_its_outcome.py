@@ -43,8 +43,7 @@ def build_reply_containing_a_package(summary_text: str = "Did the thing.") -> st
     package_json = json.dumps(
         {
             "context_to_keep_version": CONTEXT_TO_KEEP_PACKAGE_VERSION,
-            "summary_of_work_completed_this_turn": summary_text,
-            "context_to_carry_forward": [],
+            "context_to_keep": [summary_text],
         }
     )
     return f"prose\n\n```{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}\n{package_json}\n```"
@@ -142,7 +141,7 @@ def test_a_payload_with_no_reply_is_recorded_as_no_reply_found(tmp_path) -> None
 def test_a_pending_handoff_is_recorded_as_blocking(tmp_path) -> None:
     project_directory = build_project(tmp_path)
     ContextToKeepFileStore(project_directory).write_pending_context_to_keep_package(
-        ContextToKeepPackage("an earlier turn", [])
+        ContextToKeepPackage(context_to_keep=["an earlier turn"])
     )
 
     run_stop_hook(project_directory, build_reply_containing_a_package("a later turn"))
@@ -154,7 +153,7 @@ def test_a_pending_handoff_is_recorded_as_blocking(tmp_path) -> None:
     still_pending = ContextToKeepFileStore(
         project_directory
     ).read_pending_context_to_keep_package()
-    assert still_pending.summary_of_work_completed_this_turn == "an earlier turn"
+    assert still_pending.context_to_keep == ["an earlier turn"]
 
 
 def test_an_unexpected_failure_is_recorded_rather_than_swallowed(tmp_path) -> None:

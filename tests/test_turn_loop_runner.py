@@ -46,10 +46,7 @@ class LoopTestHarness:
 
     def stage_pending_handoff(self) -> None:
         self.context_to_keep_store.write_pending_context_to_keep_package(
-            ContextToKeepPackage(
-                summary_of_work_completed_this_turn="A turn happened.",
-                context_to_carry_forward=[],
-            )
+            ContextToKeepPackage(context_to_keep=["A turn happened."])
         )
 
     def record_sleep(self, duration_seconds: float) -> None:

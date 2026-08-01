@@ -1,8 +1,17 @@
 """The project's state directory, and the documents inside it.
 
-Every file this system keeps for a project lives under ``<project>/.claude``.
-That convention is stated here once. Stores name the document they want and
-otherwise know nothing about paths.
+Two locations, and the distinction between them is the point of this module.
+
+``.claude`` is the harness's own directory. Exactly one file there concerns
+this system: ``settings.local.json``, where the harness reads its hook
+registrations from. We write that file to install our hooks, and it belongs to
+the harness the rest of the time, so it is addressed on its own.
+
+Everything else this system keeps lives one level down, in
+``.claude/manual-context-persistence``, named for this repository. Keeping our
+documents in their own folder means nothing we write can collide with a file the
+harness or another tool puts in ``.claude``, and a reader can see at a glance
+which files are ours.
 
 Reads are corruption-tolerant by design rather than by accident. The writers
 include an agent emitting a handoff and hooks firing mid-turn, so a missing,
@@ -16,7 +25,23 @@ import json
 import os
 from typing import Any
 
-PROJECT_STATE_DIRECTORY_NAME = ".claude"
+HARNESS_STATE_DIRECTORY_NAME = ".claude"
+APPLICATION_STATE_DIRECTORY_NAME = "manual-context-persistence"
+
+
+def user_harness_directory_path() -> str:
+    """``~/.claude`` — the harness's directory for the user, not for one project."""
+    return os.path.join(os.path.expanduser("~"), HARNESS_STATE_DIRECTORY_NAME)
+
+
+def user_application_directory_path() -> str:
+    """``~/.claude/manual-context-persistence`` — one fixed home for our files.
+
+    The hook scripts are deployed here rather than referenced where this
+    repository happens to sit, so a project's settings file points at a path that
+    does not move when the repository does.
+    """
+    return os.path.join(user_harness_directory_path(), APPLICATION_STATE_DIRECTORY_NAME)
 
 
 class JsonDocumentFile:
@@ -56,6 +81,15 @@ class JsonDocumentFile:
         sentinel: dict[str, Any] = {}
         return self.read_dictionary_or_default(sentinel) is not sentinel
 
+    def exists(self) -> bool:
+        """True when a file is present, whether or not its content is usable.
+
+        Distinct from ``holds_content``: startup has to tell "no file here yet,
+        set it up" apart from "a file is here and I could not read it", and
+        silently overwriting the second would discard someone's settings.
+        """
+        return os.path.exists(self._file_path)
+
     def write_dictionary(self, document_dictionary: dict[str, Any]) -> str:
         os.makedirs(os.path.dirname(self._file_path), exist_ok=True)
         with open(self._file_path, "w", encoding="utf-8") as document_file:
@@ -81,12 +115,33 @@ class ProjectStateDirectory:
         self._project_directory = project_directory
 
     @property
-    def directory_path(self) -> str:
-        return os.path.join(self._project_directory, PROJECT_STATE_DIRECTORY_NAME)
+    def harness_directory_path(self) -> str:
+        """``<project>/.claude`` — the harness's directory, which we do not own."""
+        return os.path.join(self._project_directory, HARNESS_STATE_DIRECTORY_NAME)
 
-    def json_document(self, document_file_name: str) -> JsonDocumentFile:
-        return JsonDocumentFile(os.path.join(self.directory_path, document_file_name))
+    @property
+    def application_directory_path(self) -> str:
+        """``<project>/.claude/manual-context-persistence`` — everything of ours."""
+        return os.path.join(
+            self.harness_directory_path, APPLICATION_STATE_DIRECTORY_NAME
+        )
 
-    def subdirectory_path(self, subdirectory_name: str) -> str:
-        """Return a path inside the state directory without creating anything."""
-        return os.path.join(self.directory_path, subdirectory_name)
+    def harness_json_document(self, document_file_name: str) -> JsonDocumentFile:
+        """A document directly in ``.claude``, such as ``settings.local.json``."""
+        return JsonDocumentFile(
+            os.path.join(self.harness_directory_path, document_file_name)
+        )
+
+    def application_json_document(self, document_file_name: str) -> JsonDocumentFile:
+        return JsonDocumentFile(
+            os.path.join(self.application_directory_path, document_file_name)
+        )
+
+    def application_subdirectory_path(self, subdirectory_name: str) -> str:
+        """Return a path inside our directory without creating anything."""
+        return os.path.join(self.application_directory_path, subdirectory_name)
+
+    def create_application_directory(self) -> str:
+        """Create our directory if it is not already there."""
+        os.makedirs(self.application_directory_path, exist_ok=True)
+        return self.application_directory_path

@@ -47,10 +47,10 @@ class ContextToKeepFileStore:
         generate_timestamp_text: Optional[Callable[[], str]] = None,
     ) -> None:
         project_state_directory = ProjectStateDirectory(project_directory)
-        self._pending_document = project_state_directory.json_document(
+        self._pending_document = project_state_directory.application_json_document(
             CONTEXT_TO_KEEP_FILE_NAME
         )
-        self._history_directory = project_state_directory.subdirectory_path(
+        self._history_directory = project_state_directory.application_subdirectory_path(
             CONTEXT_TO_KEEP_HISTORY_DIRECTORY_NAME
         )
         self._generate_timestamp_text = (

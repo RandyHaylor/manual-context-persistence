@@ -27,8 +27,7 @@ def build_reply_containing_a_package(summary_text: str = "Did the thing.") -> st
     package_json = json.dumps(
         {
             "context_to_keep_version": CONTEXT_TO_KEEP_PACKAGE_VERSION,
-            "summary_of_work_completed_this_turn": summary_text,
-            "context_to_carry_forward": [],
+            "context_to_keep": [summary_text],
         }
     )
     return f"Some prose.\n\n```{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}\n{package_json}\n```"
@@ -41,7 +40,7 @@ def test_a_reply_carrying_a_package_is_captured() -> None:
     )
     assert decision.outcome is CaptureOutcome.CAPTURED
     assert decision.package is not None
-    assert decision.package.summary_of_work_completed_this_turn == "Did the thing."
+    assert decision.package.context_to_keep == ["Did the thing."]
 
 
 def test_a_session_the_user_does_not_work_in_is_never_captured_from() -> None:

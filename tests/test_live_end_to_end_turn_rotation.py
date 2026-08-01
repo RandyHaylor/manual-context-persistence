@@ -116,10 +116,7 @@ class LiveTurnLoopFixture:
         )
         self.context_to_keep_store.write_pending_context_to_keep_package(
             ContextToKeepPackage(
-                summary_of_work_completed_this_turn=(
-                    "Recorded the project codeword WOMBAT-8842."
-                ),
-                context_to_carry_forward=["The project codeword is WOMBAT-8842."],
+                context_to_keep=["The project codeword is WOMBAT-8842."]
             )
         )
 

@@ -30,12 +30,8 @@ from context_handoff.user_prompt_log.user_facing_session_registry import (
 )
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 
+from .branch_session_preamble import BRANCH_SESSION_PREAMBLE_TEXT
 from .handoff_message_composer import compose_handoff_message_for_base_session
-
-# A fork's transcript is not written to disk until the session has content, so
-# the fork is seeded to make it durable. The branch needs no instructions here:
-# it inherits the base session's preamble, which is where the spec puts them.
-BRANCH_SEED_PROMPT_TEXT = "Ready."
 
 # One interrupt cancels the agent's current turn; a second exits the session.
 INTERRUPT_REPEAT_COUNT_FOR_SESSION_SWAP = 2
@@ -76,6 +72,7 @@ class TurnRotationOrchestrator:
         base_session_acknowledgment_timeout_seconds: float = (
             DEFAULT_BASE_SESSION_ACKNOWLEDGMENT_TIMEOUT_SECONDS
         ),
+        branch_session_preamble_text: str = BRANCH_SESSION_PREAMBLE_TEXT,
     ) -> None:
         self._harness = harness
         self._user_interface_control = user_interface_control
@@ -87,6 +84,9 @@ class TurnRotationOrchestrator:
         self._base_session_acknowledgment_timeout_seconds = (
             base_session_acknowledgment_timeout_seconds
         )
+        # Injected rather than read here: whether a commit is required is a
+        # settings decision, and orchestration only needs the finished text.
+        self._branch_session_preamble_text = branch_session_preamble_text
         self._current_branch_session_identifier: Optional[str] = None
         self._branch_ordinal_counter = itertools.count(1)
         self._user_facing_session_registry = UserFacingSessionRegistry(
@@ -108,7 +108,7 @@ class TurnRotationOrchestrator:
         branch_creation_result = self._harness.create_branch_session_from_base_session(
             base_session_identifier=self._base_session_identifier,
             working_directory=self._project_directory,
-            branch_seed_prompt_text=BRANCH_SEED_PROMPT_TEXT,
+            branch_seed_prompt_text=self._branch_session_preamble_text,
         )
         # Registered only now, after the seeding call has finished. The seed
         # goes through the same non-interactive path a user prompt would, so

@@ -65,10 +65,7 @@ class OrchestratorTestHarness:
             branch_session_identifier, user_prompt_text
         )
         self.context_to_keep_store.write_pending_context_to_keep_package(
-            ContextToKeepPackage(
-                summary_of_work_completed_this_turn="Did the thing.",
-                context_to_carry_forward=["A fact worth keeping."],
-            )
+            ContextToKeepPackage(context_to_keep=["A fact worth keeping."])
         )
 
     def window_event_kinds(self) -> list[str]:
@@ -203,7 +200,7 @@ def test_rotation_submits_the_handoff_to_the_base_session(test_harness) -> None:
     ]
     assert len(submitted_texts) == 1
     assert "MY EXACT WORDS" in submitted_texts[0]
-    assert "Did the thing." in submitted_texts[0]
+    assert "A fact worth keeping." in submitted_texts[0]
     assert ACKNOWLEDGE_ONLY_INSTRUCTION_TEXT in submitted_texts[0]
 
 

@@ -11,29 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from context_handoff.context_to_keep.context_to_keep_package import (
-    CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG,
-    CONTEXT_TO_KEEP_PACKAGE_VERSION,
-)
 from context_handoff.interfaces.harness_interface import HarnessInterface
 
 BASE_SESSION_PREAMBLE_TEXT = (
-    "This session carries a project's context across short-lived sessions.\n\n"
-    "When you are resumed to receive a handoff, acknowledge it in one short "
-    "sentence and do nothing else.\n\n"
-    "When you are forked to work with the user, do the work they ask for, then "
-    "end the turn with one block:\n\n"
-    f"```{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}\n"
-    "{\n"
-    f'  "context_to_keep_version": {CONTEXT_TO_KEEP_PACKAGE_VERSION},\n'
-    '  "summary_of_work_completed_this_turn": "What this turn did.",\n'
-    '  "context_to_carry_forward": ["Something the next session needs."]\n'
-    "}\n"
-    "```\n\n"
-    "Carry decisions and constraints. Do not carry anything the next session "
-    "could get by reading the files, do not restate what a check confirmed, and "
-    "do not mention what was not asked for. An empty list is usually right.\n\n"
-    "Acknowledge this in one short sentence."
+    "You'll receive a history of user messages and agent work notes. "
+    "Factor these in when you work."
 )
 
 

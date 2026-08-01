@@ -87,8 +87,7 @@ def test_stop_hook_script_writes_the_package_end_to_end(tmp_path) -> None:
     package_json = json.dumps(
         {
             "context_to_keep_version": CONTEXT_TO_KEEP_PACKAGE_VERSION,
-            "summary_of_work_completed_this_turn": "End to end through the script.",
-            "context_to_carry_forward": [],
+            "context_to_keep": ["End to end through the script."],
         }
     )
     # Only sessions the user works in are captured from, so the branch has to
@@ -121,8 +120,7 @@ def test_stop_hook_script_writes_the_package_end_to_end(tmp_path) -> None:
     ).read_pending_context_to_keep_package()
     assert stored_package is not None
     assert (
-        stored_package.summary_of_work_completed_this_turn
-        == "End to end through the script."
+        stored_package.context_to_keep == ["End to end through the script."]
     )
 
 

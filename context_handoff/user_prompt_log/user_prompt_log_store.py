@@ -60,9 +60,9 @@ def cap_pre_submission_content(pre_submission_content: str) -> str:
 
 class UserPromptLogStore:
     def __init__(self, project_directory: str) -> None:
-        self._log_document = ProjectStateDirectory(project_directory).json_document(
-            USER_PROMPT_LOG_FILE_NAME
-        )
+        self._log_document = ProjectStateDirectory(
+            project_directory
+        ).application_json_document(USER_PROMPT_LOG_FILE_NAME)
 
     @property
     def user_prompt_log_file_path(self) -> str:

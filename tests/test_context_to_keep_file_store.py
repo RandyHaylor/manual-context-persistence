@@ -34,10 +34,7 @@ def build_store_with_scripted_timestamps(
 
 
 def build_package(summary_text: str = "did the thing") -> ContextToKeepPackage:
-    return ContextToKeepPackage(
-        summary_of_work_completed_this_turn=summary_text,
-        context_to_carry_forward=["a fact worth keeping"],
-    )
+    return ContextToKeepPackage(context_to_keep=[summary_text])
 
 
 def test_reading_before_anything_is_written_returns_none(tmp_path) -> None:
@@ -107,7 +104,7 @@ def test_the_rotated_history_entry_keeps_the_package_and_adds_the_timestamp(
 
     with open(history_path, "r", encoding="utf-8") as history_file:
         archived_dictionary = json.load(history_file)
-    assert archived_dictionary["summary_of_work_completed_this_turn"] == "did the thing"
+    assert archived_dictionary["context_to_keep"] == ["did the thing"]
     assert archived_dictionary["rotated_at_timestamp"] == "20260728T120000Z"
 
 

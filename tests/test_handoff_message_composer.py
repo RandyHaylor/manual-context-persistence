@@ -33,8 +33,7 @@ def build_entry(
 
 def build_package() -> ContextToKeepPackage:
     return ContextToKeepPackage(
-        summary_of_work_completed_this_turn="Wrote the stream parser and its tests.",
-        context_to_carry_forward=["The parser is pure.", "Timeouts are reported."],
+        context_to_keep=["The parser is pure.", "Timeouts are reported."]
     )
 
 
@@ -45,13 +44,6 @@ def test_the_message_carries_the_user_prompt_verbatim() -> None:
         context_to_keep_package=build_package(),
     )
     assert awkward_prompt_text in message
-
-
-def test_the_message_carries_the_turn_summary() -> None:
-    message = compose_handoff_message_for_base_session(
-        user_prompt_entries=[], context_to_keep_package=build_package()
-    )
-    assert "Wrote the stream parser and its tests." in message
 
 
 def test_the_message_carries_every_context_to_keep_entry() -> None:
@@ -113,24 +105,26 @@ def test_a_turn_with_no_user_prompt_still_composes() -> None:
         user_prompt_entries=[], context_to_keep_package=build_package()
     )
     assert ACKNOWLEDGE_ONLY_INSTRUCTION_TEXT in message
-    assert "Wrote the stream parser and its tests." in message
+    assert "The parser is pure." in message
 
 
-def test_a_package_with_nothing_carried_still_composes() -> None:
+def test_a_package_carrying_nothing_still_composes() -> None:
+    """A turn can produce nothing worth keeping; the prompt still travels."""
     message = compose_handoff_message_for_base_session(
         user_prompt_entries=[build_entry(0, "do the thing")],
-        context_to_keep_package=ContextToKeepPackage("Nothing worth carrying.", []),
+        context_to_keep_package=ContextToKeepPackage(context_to_keep=[]),
     )
-    assert "Nothing worth carrying." in message
+    assert "do the thing" in message
+    assert ACKNOWLEDGE_ONLY_INSTRUCTION_TEXT in message
 
 
 def test_the_message_is_mostly_the_material_it_carries() -> None:
-    """Everything that is not prompt or handoff text is overhead."""
+    """Everything that is not prompt or context text is overhead."""
     prompt_text = "x" * 400
-    package = ContextToKeepPackage("y" * 400, ["z" * 400])
+    package = ContextToKeepPackage(context_to_keep=["z" * 400])
     message = compose_handoff_message_for_base_session(
         user_prompt_entries=[build_entry(0, prompt_text)],
         context_to_keep_package=package,
     )
-    carried_bytes = 400 * 3
+    carried_bytes = 400 * 2
     assert carried_bytes / len(message) > 0.85

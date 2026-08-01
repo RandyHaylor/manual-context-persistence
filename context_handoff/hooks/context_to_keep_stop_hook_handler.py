@@ -26,7 +26,7 @@ from context_handoff.user_prompt_log.user_facing_session_registry import (
 from .stop_hook_capture_decision import CaptureOutcome, decide_whether_to_capture_handoff
 
 EMPTY_HOOK_RESPONSE: dict[str, Any] = {}
-LAST_STOP_HOOK_OUTCOME_FILE_NAME = "context-handoff-last-stop-hook-outcome.json"
+LAST_STOP_HOOK_OUTCOME_FILE_NAME = "last-stop-hook-outcome.json"
 
 # Enough to show whether the handoff block was present, without copying
 # transcript-sized content into a second file.
@@ -37,7 +37,7 @@ def read_last_stop_hook_outcome(project_directory: str) -> dict[str, Any]:
     """Return what the Stop hook decided last time, or {} if it never ran."""
     return (
         ProjectStateDirectory(project_directory)
-        .json_document(LAST_STOP_HOOK_OUTCOME_FILE_NAME)
+        .application_json_document(LAST_STOP_HOOK_OUTCOME_FILE_NAME)
         .read_dictionary_or_default({})
     )
 
@@ -50,7 +50,7 @@ def _record_outcome(
     agent_reply_text: Optional[str],
 ) -> None:
     reply_text = agent_reply_text if isinstance(agent_reply_text, str) else ""
-    ProjectStateDirectory(project_directory).json_document(
+    ProjectStateDirectory(project_directory).application_json_document(
         LAST_STOP_HOOK_OUTCOME_FILE_NAME
     ).write_dictionary(
         {
