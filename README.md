@@ -18,11 +18,7 @@ branch, which was forked fresh from the base and never told it directly.
 
 Design notes: [1. claude-cli-context-handoff-poc.md](1.%20claude-cli-context-handoff-poc.md)
 and [2. manual-context-persistence.md](2.%20manual-context-persistence.md).
-Decisions still open for review are in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
-
-One precondition is not automated: a branch launched in a project directory
-Claude Code has not seen before stops on its workspace-trust prompt and waits
-for an answer.
+Deferred observations are in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
 
 ## Which sessions count as the user's
 

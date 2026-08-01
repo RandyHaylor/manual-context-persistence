@@ -78,19 +78,6 @@ def run_turn_loop_application(
         return EXIT_CODE_PREFLIGHT_FAILED
     write_line(f"harness: {availability_report.detail_text}")
 
-    # Warn rather than refuse. Somebody can answer the harness's approval
-    # prompt in the window once it appears, and refusing would block that
-    # perfectly reasonable way of working.
-    if (
-        harness.read_whether_project_is_approved_for_automation(request.project_directory)
-        is False
-    ):
-        write_line(
-            "note: this project has not been approved in the harness yet, so the "
-            "first branch will wait for approval in the shared window and nothing "
-            "is captured until it is given"
-        )
-
     hook_report = inspect_hook_registration_for_project(request.project_directory)
     write_line(f"hooks: {hook_report.detail_text}")
     if not hook_report.is_ready_to_run and not request.skip_hook_preflight:

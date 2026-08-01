@@ -31,9 +31,6 @@ from .claude_cli_transcript_locator import (
     find_active_session_identifier_for_working_directory,
     read_session_display_name_from_transcript,
 )
-from .claude_cli_workspace_trust_reader import (
-    read_whether_project_directory_is_trusted,
-)
 from .non_interactive_process_launcher import (
     NonInteractiveProcessLauncherInterface,
     NonInteractiveProcessTimedOutError,
@@ -163,11 +160,6 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
         return read_session_display_name_from_transcript(
             session_identifier, working_directory, self._claude_projects_root_directory
         )
-
-    def read_whether_project_is_approved_for_automation(
-        self, working_directory: str
-    ) -> Optional[bool]:
-        return read_whether_project_directory_is_trusted(working_directory)
 
     def create_base_session_with_preamble(
         self, working_directory: str, preamble_text: str

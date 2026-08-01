@@ -93,21 +93,6 @@ class HarnessInterface(ABC):
         """Return the human-facing name shown for a session, or None if unset."""
 
     @abstractmethod
-    def read_whether_project_is_approved_for_automation(
-        self, working_directory: str
-    ) -> Optional[bool]:
-        """Has the user approved this directory for the harness to work in?
-
-        Returns None when it cannot be determined, which is distinct from a
-        definite no. Harnesses that gate on a first-run approval step may also
-        withhold project-level configuration until it is given, so a directory
-        that has not been approved can produce a session that starts, waits,
-        and records nothing.
-
-        Read-only. Granting approval is the user's decision.
-        """
-
-    @abstractmethod
     def create_base_session_with_preamble(
         self, working_directory: str, preamble_text: str
     ) -> SessionCreationResult:

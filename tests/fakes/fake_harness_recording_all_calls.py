@@ -37,8 +37,6 @@ class FakeHarnessRecordingAllCalls(HarnessInterface):
         self._branch_identifier_counter = itertools.count(1)
         self._base_identifier_counter = itertools.count(1)
         self.created_base_session_preambles: list[str] = []
-        # Unknown by default, matching a harness that cannot tell.
-        self.project_approval_by_working_directory: dict[str, Optional[bool]] = {}
 
         self.display_name_by_session_identifier: dict[str, str] = {}
         self.submitted_texts_by_session_identifier: dict[str, list[str]] = {}
@@ -67,11 +65,6 @@ class FakeHarnessRecordingAllCalls(HarnessInterface):
         self, session_identifier: str, working_directory: str
     ) -> Optional[str]:
         return self.display_name_by_session_identifier.get(session_identifier)
-
-    def read_whether_project_is_approved_for_automation(
-        self, working_directory: str
-    ) -> Optional[bool]:
-        return self.project_approval_by_working_directory.get(working_directory)
 
     def create_base_session_with_preamble(
         self, working_directory: str, preamble_text: str
