@@ -28,6 +28,9 @@ from context_handoff.context_to_keep.context_to_keep_package import (
     CONTEXT_TO_KEEP_PACKAGE_VERSION,
     ContextToKeepPackage,
 )
+from context_handoff.user_prompt_log.user_facing_session_registry import (
+    UserFacingSessionRegistry,
+)
 
 
 def build_project(tmp_path) -> str:
@@ -47,15 +50,45 @@ def build_reply_containing_a_package(summary_text: str = "Did the thing.") -> st
     return f"prose\n\n```{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}\n{package_json}\n```"
 
 
-def run_stop_hook(project_directory: str, last_assistant_message) -> dict:
+def run_stop_hook(
+    project_directory: str, last_assistant_message, session_identifier: str = "branch-session"
+) -> dict:
+    # The hook only captures from sessions the user works in, so a branch has
+    # to be registered exactly as the orchestrator registers it.
+    if session_identifier == "branch-session":
+        UserFacingSessionRegistry(project_directory).register_user_facing_session(
+            session_identifier
+        )
     return handle_stop_hook_payload(
         {
             "cwd": project_directory,
-            "session_id": "branch-session",
-            "transcript_path": "/transcripts/branch-session.jsonl",
+            "session_id": session_identifier,
+            "transcript_path": f"/transcripts/{session_identifier}.jsonl",
             "hook_event_name": "Stop",
             "last_assistant_message": last_assistant_message,
         }
+    )
+
+
+def test_a_reply_from_the_base_session_is_never_captured(tmp_path) -> None:
+    """Delivering a handoff ends a turn in the base session and fires this hook.
+
+    Its acknowledgement quotes the user's words back, so it can plausibly
+    contain a fenced block. Capturing that would rotate the base's own reply as
+    though it were a branch's work.
+    """
+    project_directory = build_project(tmp_path)
+
+    run_stop_hook(
+        project_directory,
+        build_reply_containing_a_package("the base session's own reply"),
+        session_identifier="the-base-session",
+    )
+
+    assert not ContextToKeepFileStore(project_directory).has_pending_context_to_keep()
+    assert (
+        read_last_stop_hook_outcome(project_directory)["outcome"]
+        == CaptureOutcome.NOT_A_USER_FACING_SESSION.value
     )
 
 

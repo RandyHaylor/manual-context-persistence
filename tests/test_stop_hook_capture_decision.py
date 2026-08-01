@@ -44,6 +44,44 @@ def test_a_reply_carrying_a_package_is_captured() -> None:
     assert decision.package.summary_of_work_completed_this_turn == "Did the thing."
 
 
+def test_a_session_the_user_does_not_work_in_is_never_captured_from() -> None:
+    """The base session ends turns too, and its replies are not handoffs.
+
+    Observed in a driven run: delivering a handoff is a resume against the base
+    session, which ends a turn and fires this hook. The base's acknowledgement
+    was inspected for a package. It was only harmless because something else
+    happened to block it.
+    """
+    decision = decide_whether_to_capture_handoff(
+        last_agent_reply_text=build_reply_containing_a_package(),
+        a_handoff_is_already_pending=False,
+        session_is_user_facing=False,
+    )
+    assert decision.outcome is CaptureOutcome.NOT_A_USER_FACING_SESSION
+    assert decision.package is None
+
+
+def test_the_user_facing_check_precedes_every_other_reason() -> None:
+    """A reply from elsewhere is not ours to judge on any other ground."""
+    for pending in (True, False):
+        for reply_text in (None, "ordinary", build_reply_containing_a_package()):
+            decision = decide_whether_to_capture_handoff(
+                last_agent_reply_text=reply_text,
+                a_handoff_is_already_pending=pending,
+                session_is_user_facing=False,
+            )
+            assert decision.outcome is CaptureOutcome.NOT_A_USER_FACING_SESSION
+
+
+def test_a_user_facing_session_is_the_default() -> None:
+    """Existing callers keep working; the gate is opt-in for the hook."""
+    decision = decide_whether_to_capture_handoff(
+        last_agent_reply_text=build_reply_containing_a_package(),
+        a_handoff_is_already_pending=False,
+    )
+    assert decision.outcome is CaptureOutcome.CAPTURED
+
+
 def test_an_ordinary_reply_is_declined_as_having_no_package() -> None:
     """Most turns end without a handoff; that is normal, not a failure."""
     decision = decide_whether_to_capture_handoff(

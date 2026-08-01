@@ -19,6 +19,9 @@ from context_handoff.context_to_keep.context_to_keep_file_store import (
     ContextToKeepFileStore,
 )
 from context_handoff.project_state.project_state_directory import ProjectStateDirectory
+from context_handoff.user_prompt_log.user_facing_session_registry import (
+    UserFacingSessionRegistry,
+)
 
 from .stop_hook_capture_decision import CaptureOutcome, decide_whether_to_capture_handoff
 
@@ -77,6 +80,11 @@ def handle_stop_hook_payload(hook_payload: dict[str, Any]) -> dict[str, Any]:
             a_handoff_is_already_pending=(
                 context_to_keep_store.has_pending_context_to_keep()
             ),
+            # Same gate the prompt hook uses, for the same reason: the
+            # orchestrator's own sessions end turns too.
+            session_is_user_facing=UserFacingSessionRegistry(
+                project_directory
+            ).is_user_facing_session(hook_payload.get("session_id") or ""),
         )
         if decision.package is not None:
             context_to_keep_store.write_pending_context_to_keep_package(decision.package)

@@ -30,6 +30,7 @@ class CaptureOutcome(Enum):
     NO_PACKAGE_IN_REPLY = "no_package_in_reply"
     PACKAGE_PRESENT_BUT_UNUSABLE = "package_present_but_unusable"
     EARLIER_HANDOFF_STILL_PENDING = "earlier_handoff_still_pending"
+    NOT_A_USER_FACING_SESSION = "not_a_user_facing_session"
     UNEXPECTED_FAILURE = "unexpected_failure"
 
 
@@ -48,6 +49,10 @@ _REASON_TEXT_BY_OUTCOME = {
     CaptureOutcome.EARLIER_HANDOFF_STILL_PENDING: (
         "earlier_handoff_still_pending: a previous handoff has not been consumed "
         "yet and must not be overwritten"
+    ),
+    CaptureOutcome.NOT_A_USER_FACING_SESSION: (
+        "not_a_user_facing_session: this turn belongs to a session the user does "
+        "not work in, so its reply is not a handoff"
     ),
     CaptureOutcome.UNEXPECTED_FAILURE: (
         "unexpected_failure: the hook raised before it could reach a decision"
@@ -73,13 +78,23 @@ def _build_decision(
 def decide_whether_to_capture_handoff(
     last_agent_reply_text: Optional[str],
     a_handoff_is_already_pending: bool,
+    session_is_user_facing: bool = True,
 ) -> CaptureDecision:
     """Decide, and say why.
 
-    The pending check comes first because it is the more actionable answer: a
-    stalled loop explains every subsequent quiet turn, and reporting a parse
-    problem instead would send a reader after the wrong thing.
+    Ownership is settled first. The orchestrator drives sessions of its own —
+    the base session most of all — and every one of them ends turns and reaches
+    this hook. A reply from one of those is not a handoff, and judging it on
+    any other ground would be answering the wrong question.
+
+    The pending check comes next because it is the more actionable of the
+    remaining answers: a stalled loop explains every later quiet turn, and
+    reporting a parse problem instead would send a reader after the wrong
+    thing.
     """
+    if not session_is_user_facing:
+        return _build_decision(CaptureOutcome.NOT_A_USER_FACING_SESSION)
+
     if a_handoff_is_already_pending:
         return _build_decision(CaptureOutcome.EARLIER_HANDOFF_STILL_PENDING)
 

@@ -91,6 +91,12 @@ def test_stop_hook_script_writes_the_package_end_to_end(tmp_path) -> None:
             "context_to_carry_forward": [],
         }
     )
+    # Only sessions the user works in are captured from, so the branch has to
+    # be registered exactly as the orchestrator registers it.
+    UserFacingSessionRegistry(project_directory).register_user_facing_session(
+        "branch-session"
+    )
+
     # The payload shape the platform actually sends, confirmed against a real
     # session: the final assistant text arrives in last_assistant_message.
     completed = run_hook_script(
