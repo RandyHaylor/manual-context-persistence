@@ -40,7 +40,26 @@ inspected the base session's acknowledgement for a handoff package.
 Being fixed now by gating the Stop hook on the user-facing session registry,
 the same gate the prompt hook already uses.
 
-### B. Ghost text appears in the input box between turns
+### B. The mid-turn look-behind may now be redundant
+The spec points at the source-of-truth implementation for capturing mid-turn
+messages, and that implementation is explicit that "a message sent while the
+agent is working does NOT fire its own UserPromptSubmit hook".
+
+A standalone spike on CLI 2.1.220 found the opposite: typing during a turn and
+letting the queued message be submitted **does** fire its own UserPromptSubmit,
+with the message in the `prompt` field. The platform appears to have changed
+since that reference was written.
+
+The look-behind is kept — the spec asks for it, and older CLI versions still
+need it — but it is now belt-and-braces rather than the only path. A test pins
+down that a message appearing both as a queued attachment and as the genuine
+prompt it became is recovered only once.
+
+Worth deciding: keep both paths, or drop the look-behind and depend on the
+platform. I have not dropped it, because that would be a spec deviation based
+on one version's behaviour.
+
+### C. Ghost text appears in the input box between turns
 Driven runs sometimes show text in the pane's input box that was never typed —
 plausible follow-up suggestions. It has not caused an observable problem and
 the log has never contained it. Noted only so it is not mistaken later for

@@ -262,6 +262,33 @@ def test_an_attachment_style_incoming_prompt_is_recognised_as_already_recorded(
     ) == ["mid-turn aside"]
 
 
+def test_a_queued_message_that_also_became_a_prompt_is_not_recovered_twice(
+    tmp_path,
+) -> None:
+    """Verified on CLI 2.1.220: a queued message fires its own prompt hook.
+
+    The reference implementation this mirrors was written when it did not. So
+    the same message can now appear twice in a transcript — once as the
+    queued_command attachment, and again as the genuine prompt it became — and
+    the normal path has already logged it by the time this runs.
+
+    The gap anchor is what keeps it single: the genuine prompt becomes the
+    anchor, and the attachment that preceded it falls outside the window.
+    """
+    transcript_path = write_transcript(
+        tmp_path,
+        [
+            genuine_user_prompt_record("the first prompt"),
+            queued_human_message_record("typed while the agent worked"),
+            genuine_user_prompt_record("typed while the agent worked"),
+        ],
+    )
+    assert (
+        find_user_messages_sent_while_agent_was_working(transcript_path, "the next prompt")
+        == []
+    )
+
+
 def test_the_anchor_is_judged_by_record_shape_alone(tmp_path) -> None:
     """Mirrors the reference: any string-content user record moves the anchor.
 
