@@ -30,8 +30,12 @@ from context_handoff.user_prompt_log.user_facing_session_registry import (
 )
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 
-from .branch_session_briefing import build_branch_session_briefing_text
 from .handoff_message_composer import compose_handoff_message_for_base_session
+
+# A fork's transcript is not written to disk until the session has content, so
+# the fork is seeded to make it durable. The branch needs no instructions here:
+# it inherits the base session's preamble, which is where the spec puts them.
+BRANCH_SEED_PROMPT_TEXT = "Ready."
 
 # One interrupt cancels the agent's current turn; a second exits the session.
 INTERRUPT_REPEAT_COUNT_FOR_SESSION_SWAP = 2
@@ -104,10 +108,7 @@ class TurnRotationOrchestrator:
         branch_creation_result = self._harness.create_branch_session_from_base_session(
             base_session_identifier=self._base_session_identifier,
             working_directory=self._project_directory,
-            # The briefing IS the seed: it both materializes the fork on disk
-            # and tells the branch the handoff protocol it is expected to
-            # follow.
-            branch_seed_prompt_text=build_branch_session_briefing_text(),
+            branch_seed_prompt_text=BRANCH_SEED_PROMPT_TEXT,
         )
         # Registered only now, after the seeding call has finished. The seed
         # goes through the same non-interactive path a user prompt would, so
