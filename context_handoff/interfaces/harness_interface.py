@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 
 @dataclass(frozen=True)
@@ -109,12 +109,19 @@ class HarnessInterface(ABC):
         base_session_identifier: str,
         working_directory: str,
         branch_seed_prompt_text: str,
+        announce_branch_session_identifier: Optional[Callable[[str], None]] = None,
     ) -> SessionCreationResult:
         """Fork a new branch session that inherits the base session's context.
 
         The base session must be left unmodified. The returned branch must be
         fully durable on disk before this method returns, so a caller may
         immediately resume it or fork from it.
+
+        ``announce_branch_session_identifier`` is called with the new session's
+        identifier before the seed is sent, and must be honoured by every
+        implementation. The seeded session answers the seed, and that reply is
+        the first turn of real work — so a caller that can only learn the
+        identifier from the return value learns it one turn too late.
         """
 
     @abstractmethod

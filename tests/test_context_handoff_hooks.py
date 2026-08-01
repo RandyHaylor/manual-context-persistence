@@ -111,10 +111,17 @@ def test_prompt_hook_ignores_a_session_the_user_is_not_typing_into(tmp_path) -> 
 
 
 def test_prompt_hook_logs_a_registered_branch_but_not_its_seed(tmp_path) -> None:
-    """The seed arrives before registration; the user's prompts arrive after."""
+    """The seed arrives while the branch is being seeded; the user's prompts after.
+
+    The branch is registered before the seed is sent, so the Stop hook can keep
+    the handoff from that first turn. That means registration alone can no longer
+    tell the seed apart from a typed prompt — the seeding mark does.
+    """
     project_directory = str(tmp_path / "project")
     os.makedirs(project_directory)
+    registry = UserFacingSessionRegistry(project_directory)
 
+    registry.begin_seeding_user_facing_session("branch-session")
     handle_user_prompt_submit_payload(
         {
             "cwd": project_directory,
@@ -122,7 +129,7 @@ def test_prompt_hook_logs_a_registered_branch_but_not_its_seed(tmp_path) -> None
             "prompt": "[context-handoff branch seed] (orchestrator process seed, ignore this)",
         }
     )
-    register_user_facing_session(project_directory, "branch-session")
+    registry.finish_seeding_user_facing_session("branch-session")
     handle_user_prompt_submit_payload(
         {
             "cwd": project_directory,

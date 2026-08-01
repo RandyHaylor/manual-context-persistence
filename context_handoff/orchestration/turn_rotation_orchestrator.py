@@ -124,16 +124,20 @@ class TurnRotationOrchestrator:
     def _launch_new_branch_session_in_shared_window(
         self, branch_seed_prompt_text: str
     ) -> str:
+        # Recorded before the seed is sent, and marked as being seeded while it
+        # is. The session answers the seed, and with a task in that seed the
+        # answer is the first turn of real work — so waiting until the call
+        # returns would throw that handoff away. Marking it as being seeded is
+        # what still keeps the orchestrator's own words out of the prompt log.
         branch_creation_result = self._harness.create_branch_session_from_base_session(
             base_session_identifier=self._base_session_identifier,
             working_directory=self._project_directory,
             branch_seed_prompt_text=branch_seed_prompt_text,
+            announce_branch_session_identifier=(
+                self._user_facing_session_registry.begin_seeding_user_facing_session
+            ),
         )
-        # Registered only now, after the seeding call has finished. The seed
-        # goes through the same non-interactive path a user prompt would, so
-        # registering any earlier would record the orchestrator's own seed text
-        # as something the user said.
-        self._user_facing_session_registry.register_user_facing_session(
+        self._user_facing_session_registry.finish_seeding_user_facing_session(
             branch_creation_result.session_identifier
         )
 

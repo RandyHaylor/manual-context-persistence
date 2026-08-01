@@ -21,6 +21,9 @@ from context_handoff.orchestration.turn_rotation_orchestrator import (
     SHARED_WINDOW_STATUS_TEXT_WHILE_UPDATING_BASE,
     TurnRotationOrchestrator,
 )
+from context_handoff.user_prompt_log.user_facing_session_registry import (
+    UserFacingSessionRegistry,
+)
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogStore
 from tests.fakes.fake_harness_recording_all_calls import FakeHarnessRecordingAllCalls
 from tests.fakes.fake_user_interface_control_recording_all_calls import (
@@ -99,6 +102,104 @@ def test_starting_opens_the_window_and_runs_a_branch_in_it(test_harness) -> None
     ]
     assert "run_command_line_in_shared_window" in test_harness.window_event_kinds()
     assert branch_session_identifier
+
+
+class FakeHarnessCheckingTheRegistryWhileItSeeds(FakeHarnessRecordingAllCalls):
+    """Answers, at seed time, the two questions the hooks will ask.
+
+    The seeded session replies to the seed, and with a task in that seed the
+    reply is the first turn of real work. So what the registry says *during* the
+    seeding call is what decides whether that handoff is kept — checking after
+    the call returns cannot see the problem at all.
+    """
+
+    def __init__(self, project_directory: str, **keyword_arguments):
+        super().__init__(**keyword_arguments)
+        self._project_directory = project_directory
+        self.was_user_facing_while_seeding: list = []
+        self.was_accepting_user_prompts_while_seeding: list = []
+
+    def create_branch_session_from_base_session(
+        self,
+        base_session_identifier: str,
+        working_directory: str,
+        branch_seed_prompt_text: str,
+        announce_branch_session_identifier=None,
+    ):
+        def record_what_the_registry_says(branch_session_identifier: str) -> None:
+            if announce_branch_session_identifier is not None:
+                announce_branch_session_identifier(branch_session_identifier)
+            registry = UserFacingSessionRegistry(self._project_directory)
+            self.was_user_facing_while_seeding.append(
+                registry.is_user_facing_session(branch_session_identifier)
+            )
+            self.was_accepting_user_prompts_while_seeding.append(
+                registry.is_session_accepting_user_prompts(branch_session_identifier)
+            )
+
+        return super().create_branch_session_from_base_session(
+            base_session_identifier=base_session_identifier,
+            working_directory=working_directory,
+            branch_seed_prompt_text=branch_seed_prompt_text,
+            announce_branch_session_identifier=record_what_the_registry_says,
+        )
+
+
+def test_a_session_is_capturable_while_it_is_still_being_seeded(tmp_path) -> None:
+    """The handoff from the seed turn must not be thrown away.
+
+    Found in a live run: the seeded session did its task, emitted a valid block,
+    and the Stop hook discarded it as "not a user-facing session" — because the
+    session was written down only after the seeding call returned.
+    """
+    project_directory = str(tmp_path)
+    checking_harness = FakeHarnessCheckingTheRegistryWhileItSeeds(
+        project_directory,
+        active_session_identifier_by_working_directory={
+            project_directory: BASE_SESSION_IDENTIFIER
+        },
+    )
+    orchestrator = TurnRotationOrchestrator(
+        harness=checking_harness,
+        user_interface_control=FakeUserInterfaceControlRecordingAllCalls(),
+        context_to_keep_store=ContextToKeepFileStore(project_directory),
+        user_prompt_log_store=UserPromptLogStore(project_directory),
+        project_directory=project_directory,
+        base_session_identifier=BASE_SESSION_IDENTIFIER,
+        shared_window_identifier=WINDOW_IDENTIFIER,
+    )
+
+    orchestrator.start_first_branch_session()
+
+    assert checking_harness.was_user_facing_while_seeding == [True]
+
+
+def test_the_seed_itself_is_not_treated_as_something_the_user_typed(tmp_path) -> None:
+    """The other half: the seed travels the same path a typed prompt does."""
+    project_directory = str(tmp_path)
+    checking_harness = FakeHarnessCheckingTheRegistryWhileItSeeds(
+        project_directory,
+        active_session_identifier_by_working_directory={
+            project_directory: BASE_SESSION_IDENTIFIER
+        },
+    )
+    orchestrator = TurnRotationOrchestrator(
+        harness=checking_harness,
+        user_interface_control=FakeUserInterfaceControlRecordingAllCalls(),
+        context_to_keep_store=ContextToKeepFileStore(project_directory),
+        user_prompt_log_store=UserPromptLogStore(project_directory),
+        project_directory=project_directory,
+        base_session_identifier=BASE_SESSION_IDENTIFIER,
+        shared_window_identifier=WINDOW_IDENTIFIER,
+    )
+
+    branch_session_identifier = orchestrator.start_first_branch_session()
+
+    assert checking_harness.was_accepting_user_prompts_while_seeding == [False]
+    # And once the orchestrator has finished talking, the user's turn begins.
+    assert UserFacingSessionRegistry(
+        project_directory
+    ).is_session_accepting_user_prompts(branch_session_identifier)
 
 
 def test_only_the_first_session_is_seeded_with_the_request_for_instructions(

@@ -62,6 +62,88 @@ def test_several_branches_accumulate_in_registration_order(tmp_path) -> None:
     assert registry.is_user_facing_session("branch-one") is True
 
 
+def test_a_session_being_seeded_is_already_capturable(tmp_path) -> None:
+    """Its replies are handoffs from its first turn, seed or not.
+
+    Found in a live run: the seeded session did its task, emitted a valid block,
+    and the Stop hook discarded it because the session had not been written down
+    yet.
+    """
+    registry = UserFacingSessionRegistry(str(tmp_path))
+
+    registry.begin_seeding_user_facing_session("a-branch")
+
+    assert registry.is_user_facing_session("a-branch") is True
+
+
+def test_a_session_being_seeded_is_not_accepting_user_prompts_yet(tmp_path) -> None:
+    """The seed travels the same path a typed prompt does, so it must not log."""
+    registry = UserFacingSessionRegistry(str(tmp_path))
+
+    registry.begin_seeding_user_facing_session("a-branch")
+
+    assert registry.is_session_accepting_user_prompts("a-branch") is False
+
+
+def test_finishing_the_seeding_hands_the_session_to_the_user(tmp_path) -> None:
+    registry = UserFacingSessionRegistry(str(tmp_path))
+    registry.begin_seeding_user_facing_session("a-branch")
+
+    registry.finish_seeding_user_facing_session("a-branch")
+
+    assert registry.is_user_facing_session("a-branch") is True
+    assert registry.is_session_accepting_user_prompts("a-branch") is True
+
+
+def test_seeding_state_survives_a_new_registry_instance(tmp_path) -> None:
+    """The hooks read it from separate processes, so it has to be on disk."""
+    UserFacingSessionRegistry(str(tmp_path)).begin_seeding_user_facing_session(
+        "a-branch"
+    )
+
+    registry_in_another_process = UserFacingSessionRegistry(str(tmp_path))
+    assert registry_in_another_process.is_user_facing_session("a-branch") is True
+    assert (
+        registry_in_another_process.is_session_accepting_user_prompts("a-branch")
+        is False
+    )
+
+
+def test_finishing_one_session_leaves_another_still_seeding(tmp_path) -> None:
+    registry = UserFacingSessionRegistry(str(tmp_path))
+    registry.begin_seeding_user_facing_session("first-branch")
+    registry.begin_seeding_user_facing_session("second-branch")
+
+    registry.finish_seeding_user_facing_session("first-branch")
+
+    assert registry.is_session_accepting_user_prompts("first-branch") is True
+    assert registry.is_session_accepting_user_prompts("second-branch") is False
+
+
+def test_beginning_seeding_twice_is_harmless(tmp_path) -> None:
+    registry = UserFacingSessionRegistry(str(tmp_path))
+    registry.begin_seeding_user_facing_session("a-branch")
+    registry.begin_seeding_user_facing_session("a-branch")
+
+    assert registry.read_registered_session_identifiers() == ["a-branch"]
+    assert registry.read_session_identifiers_being_seeded() == ["a-branch"]
+
+
+def test_a_session_nobody_registered_is_denied_both_ways(tmp_path) -> None:
+    registry = UserFacingSessionRegistry(str(tmp_path))
+    assert registry.is_user_facing_session("a-stranger") is False
+    assert registry.is_session_accepting_user_prompts("a-stranger") is False
+
+
+def test_a_plain_registration_accepts_user_prompts_immediately(tmp_path) -> None:
+    """Nothing is being seeded, so there is no window to wait out."""
+    registry = UserFacingSessionRegistry(str(tmp_path))
+
+    registry.register_user_facing_session("a-branch")
+
+    assert registry.is_session_accepting_user_prompts("a-branch") is True
+
+
 def test_a_corrupt_registry_denies_rather_than_crashing(tmp_path) -> None:
     """Failing open would silently readmit machine prompts into the log."""
     registry = build_registry(tmp_path)

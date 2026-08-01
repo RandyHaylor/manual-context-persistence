@@ -208,8 +208,13 @@ class ClaudeCliHarnessAdapter(HarnessInterface):
         base_session_identifier: str,
         working_directory: str,
         branch_seed_prompt_text: str,
+        announce_branch_session_identifier: Optional[Callable[[str], None]] = None,
     ) -> SessionCreationResult:
         branch_session_identifier = self._generate_branch_session_identifier()
+        # Announced before the seed is sent, never after: the seeded session
+        # answers the seed, and that reply is already a handoff.
+        if announce_branch_session_identifier is not None:
+            announce_branch_session_identifier(branch_session_identifier)
         branch_creation_argv = [
             self._claude_executable_name,
             "--resume",

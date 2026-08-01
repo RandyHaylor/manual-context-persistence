@@ -42,9 +42,14 @@ def handle_user_prompt_submit_payload(hook_payload: dict[str, Any]) -> dict[str,
         # drives itself — the base session, and the non-interactive calls that
         # seed a branch or deliver a handoff — and logging those would record
         # the orchestrator's own words as the user's.
-        if not UserFacingSessionRegistry(project_directory).is_user_facing_session(
-            session_identifier
-        ):
+        #
+        # Deliberately not the same question the Stop hook asks. A branch is
+        # user-facing from the moment it exists, because its replies are
+        # handoffs; but while the orchestrator is still seeding it, the text
+        # arriving is the orchestrator's own.
+        if not UserFacingSessionRegistry(
+            project_directory
+        ).is_session_accepting_user_prompts(session_identifier):
             return EMPTY_HOOK_RESPONSE
 
         transcript_path = hook_payload.get("transcript_path")

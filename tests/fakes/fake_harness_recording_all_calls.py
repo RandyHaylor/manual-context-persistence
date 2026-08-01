@@ -86,11 +86,16 @@ class FakeHarnessRecordingAllCalls(HarnessInterface):
         base_session_identifier: str,
         working_directory: str,
         branch_seed_prompt_text: str,
+        announce_branch_session_identifier=None,
     ) -> SessionCreationResult:
         self.created_branch_parent_identifiers.append(base_session_identifier)
         branch_session_identifier = (
             f"fake-branch-{next(self._branch_identifier_counter)}-of-{base_session_identifier}"
         )
+        # Announced before the seed is recorded, mirroring the real adapter: the
+        # seeded session answers the seed, and that reply is already a handoff.
+        if announce_branch_session_identifier is not None:
+            announce_branch_session_identifier(branch_session_identifier)
         # The seed is recorded against the branch, never against the base: the
         # base session must be left unmodified by a fork.
         self.submitted_texts_by_session_identifier[branch_session_identifier] = [
