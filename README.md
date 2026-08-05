@@ -12,19 +12,74 @@ transcript.
 
 ## Status
 
-The full loop has been driven end to end by hand against a real Claude CLI and
-a real tmux window: a codeword established in one branch was known by the next
-branch, which was forked fresh from the base and never told it directly.
+Working. The loop has run unattended across a real multi-turn task: the user
+asked for a browser game, and successive branches built it, reviewed their own
+work, created a public GitHub repository and pushed to it — each branch forked
+fresh from the base, carrying only the accumulated handoffs.
+
+Earlier, the core claim was isolated by hand: a codeword established in one
+branch was known by the next, which was forked from the base and never told it
+directly.
+
+Two things about that run are worth knowing before repeating it. It was stopped
+manually rather than finishing on its own — the loop keeps rotating for as long
+as branches keep emitting handoff packages, and nothing bounds that. And the
+run cost real money; see [Cost](#cost).
+
+503 tests pass against fakes and argv assertions. The opt-in live suite
+(`CONTEXT_HANDOFF_RUN_LIVE_CLAUDE_TESTS=1`) has not been run.
 
 Design notes: [1. claude-cli-context-handoff-poc.md](1.%20claude-cli-context-handoff-poc.md)
 and [2. manual-context-persistence.md](2.%20manual-context-persistence.md).
 Deferred observations are in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
 
+## Cost
+
+This design trades money for a small base session, and the trade is not
+subtle — worth understanding before running it on anything long.
+
+Measured from the `message.usage` records of one real run (12 sessions: 1 base,
+11 branches; 90 billed calls, de-duplicated by message id, since a forked
+transcript carries copies of the parent's usage records and naive summing
+double-counts):
+
+| | tokens |
+| --- | ---: |
+| cache write | 1,333,771 |
+| cache read | 4,264,005 |
+| output | 71,352 |
+| fresh input | 171 |
+
+At the Claude Opus 5 rates that run used — $5/$25 per Mtok, cache write 1.25×
+input, cache read 0.1× — that is **≈ $12.25**, of which **68% is cache writes**.
+At a 1-hour cache TTL (write 2× instead of 1.25×) the same run is ≈ $17.25.
+
+**Where the overhead comes from.** Every rotation forks a *new* session, and a
+new session cannot read the previous branch's cache. The inherited base context
+is therefore written cold at 1.25–2× rather than read at 0.1× — the same tokens
+at 12.5–20× the price. It shows up as cache writes being 31% of cache reads
+here, a fraction that would be far smaller in one long session where the prefix
+is written once and read on every subsequent turn.
+
+**How much is overhead.** If every written token had instead been a cache read —
+the best case for a single ordinary session — the run would have cost ≈ $4.58.
+So this approach cost up to **~2.7×** a single-session equivalent. That is an
+upper bound, not an estimate: some of those writes are unavoidable, because new
+content must be written to cache once regardless of how sessions are
+structured, and the usage records don't separate "genuinely new" from
+"re-written because we forked".
+
+The base session itself is cheap and stays that way — 24 fresh input tokens,
+215K cache write, 5,310 output across the whole run. The cost is entirely in
+branches re-establishing context, which is the tradeoff the design makes on
+purpose.
+
 ## Which sessions count as the user's
 
 The orchestrator drives sessions of its own — the base session, and the
-short-lived calls that seed a branch or deliver a handoff. All of them end
-turns and submit prompts, so all of them reach the hooks.
+short-lived call that delivers a handoff to it. Both end turns and submit
+prompts, so both reach the hooks. A branch's own seeding turn does too: the seed
+rides on the launch command, so the branch answers it as its first visible turn.
 
 Branches are registered in `.claude/context-handoff-user-facing-sessions.json`,
 and both hooks ignore anything unregistered. Without that gate the verbatim log
