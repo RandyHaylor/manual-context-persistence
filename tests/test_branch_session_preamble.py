@@ -116,29 +116,58 @@ def test_the_guidance_states_what_the_bullets_are_for() -> None:
     assert "concluding reply" in guidance
 
 
-def test_emission_is_triggered_by_work_worth_saving() -> None:
-    """Not by a turn ending.
+def test_emission_is_triggered_by_a_minimal_increment_worth_saving() -> None:
+    """Not by the work being complete, and not by a turn ending.
 
-    Every turn fires on a question or an acknowledgement, and each of those
-    costs a full rotation to carry nothing. A turn named in advance points at
-    whichever turn this text arrives in, where no work has happened yet.
+    Triggering on completeness lets one session build a whole project before
+    handing anything over. Triggering on a turn ending fires the block on a
+    question, which costs a full rotation to carry nothing.
     """
     lowercased = BRANCH_SESSION_PREAMBLE_TEXT.lower()
-    assert "work worth saving" in lowercased
+    assert "minimal amount" in lowercased
+    assert "worth saving" in lowercased
     assert "this turn" not in lowercased
     assert "every turn" not in lowercased
 
 
-def test_it_says_when_to_leave_the_block_out() -> None:
-    """Without this the trigger reads as advice and the block appears anyway."""
+def test_the_two_endings_are_stated_as_mutually_exclusive() -> None:
+    """The defect this text exists to prevent.
+
+    A live run produced five consecutive sessions with no tool calls, each
+    asking the user to choose between the same three options while also emitting
+    a block saying to wait for that choice. Nobody could answer.
+    """
     lowercased = BRANCH_SESSION_PREAMBLE_TEXT.lower()
-    assert "skip it" in lowercased
-    assert "question" in lowercased
-    assert "acknowledgement" in lowercased
+    assert "never both" in lowercased
+    assert "never include a block and a question in the same response" in lowercased
+
+
+def test_it_says_which_ending_covers_being_unfinished() -> None:
+    """Without this the session sorts on whether it asked, not on being done."""
+    lowercased = BRANCH_SESSION_PREAMBLE_TEXT.lower()
+    assert "not finished with this chunk of work" in lowercased
+
+
+def test_it_warns_that_prose_beside_a_block_is_lost() -> None:
+    """The reason, not just the rule.
+
+    Told only the rule, a session rationalizes its way past it — the block is
+    due, so it emits one and is helpfully conversational alongside. Told the
+    prose is discarded, the incentive itself is gone.
+    """
+    lowercased = BRANCH_SESSION_PREAMBLE_TEXT.lower()
+    assert "will not be seen and will be lost" in lowercased
 
 
 def test_it_never_describes_the_machinery() -> None:
-    """This is the session the user talks to; it needs no theory of itself."""
+    """This is the session the user talks to; it needs no theory of itself.
+
+    ``session`` is on the list because the earlier list let a draft through that
+    said the block "ends your session", that a question would be "asked by a
+    session that is already gone", and that "the session that follows will ask
+    it" — all lifecycle, and all invisible to a check that only banned the
+    compound terms.
+    """
     lowercased = BRANCH_SESSION_PREAMBLE_TEXT.lower()
     for machinery_word in (
         "base session",
@@ -149,6 +178,7 @@ def test_it_never_describes_the_machinery() -> None:
         "resumed",
         "orchestrat",
         "rotation",
+        "session",
     ):
         assert machinery_word not in lowercased, (
             f"it mentions {machinery_word!r}; the working session reads this"
@@ -289,5 +319,11 @@ def test_the_commit_requirement_reaches_the_first_session_too() -> None:
 
 
 def test_it_stays_short_enough_to_read() -> None:
-    """It is a contract now, not one sentence, but it is still not a document."""
-    assert len(build_branch_session_preamble_text(require_git_commit=True)) < 1200
+    """It is a contract now, not one sentence, but it is still not a document.
+
+    The bound was 1200 while there was a single trigger sentence. Describing two
+    mutually exclusive endings costs roughly 300 more characters, and that spend
+    bought the fix for a loop that burned five sessions carrying nothing. The
+    bound is raised rather than dropped so the text still cannot become prose.
+    """
+    assert len(build_branch_session_preamble_text(require_git_commit=True)) < 1700

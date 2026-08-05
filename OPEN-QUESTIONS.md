@@ -41,6 +41,34 @@ install-or-abort when the file exists without these hooks.
 
 ## Resolved
 
+- **Interrupting a session that is still working** — not a real case, and not to
+  be treated as one again.
+
+  Measured on CLI 2.1.220, driving a real tmux pane: `Ctrl+C` twice exits a
+  session that is idle at its prompt, but a session that is mid-turn only has
+  its turn cancelled and stays alive, needing a second pair. That measurement is
+  true, and it is also irrelevant to the turn loop, because rotation cannot
+  reach a mid-turn session: a rotation happens only when a context-to-keep is
+  pending, that file is written only by the Stop hook, and the Stop hook fires
+  only once the agent has finished replying.
+
+  A day was spent designing escalating interrupts and retry loops for this, on
+  the strength of a spike that interrupted as soon as the branch's *transcript
+  file appeared* — which happens mid-turn. That trigger is not the one the app
+  uses. The busy session was manufactured by the spike.
+
+  Two things follow. First, the spec's "send `Ctrl+C` twice" (spec 1 line 75) is
+  correct as written and needs no change. Second, a pane's state is not a
+  substitute for the Stop signal: `pane_current_command` distinguishes a running
+  session from a shell, but an agent generating a reply and an agent waiting for
+  input are the same process, so it cannot tell a turn has ended.
+
+  Still genuinely possible, and much narrower: the base session is interrupted
+  after only its *transcript* is observed, not after Stop, so that one path can
+  hit a working session; and a user who submits another prompt between Stop
+  firing and the rotation leaves the branch busy. Neither justifies escalation
+  in the general path.
+
 - **Package schema field names** — mine to choose.
 - **Polling rather than watching the context-to-keep file** — accepted.
 - **Workspace trust** — scrubbed. It was never in either spec. It surfaced only

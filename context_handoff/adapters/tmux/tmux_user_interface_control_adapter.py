@@ -22,6 +22,12 @@ from typing import Callable, Optional
 # the submit keystroke lands, short enough not to be felt between turns.
 DEFAULT_INPUT_SETTLE_DELAY_SECONDS = 1.0
 
+# How long to wait for the pane to hand itself back to its shell before typing.
+# Generous, because what it waits on is an interactive agent shutting down, and
+# how long that takes depends on what the agent was in the middle of.
+DEFAULT_SHELL_READINESS_TIMEOUT_SECONDS = 30.0
+DEFAULT_SHELL_READINESS_POLL_INTERVAL_SECONDS = 0.25
+
 from context_handoff.interfaces.user_interface_control_interface import (
     UserInterfaceControlInterface,
 )
@@ -45,6 +51,22 @@ CANDIDATE_TERMINAL_EMULATOR_NAMES = (
     "kitty",
     "xterm",
 )
+
+
+class SharedWindowNeverBecameReadyError(RuntimeError):
+    """The pane never handed itself back to its shell, so nothing was typed.
+
+    Raised rather than typing anyway. Text delivered to a pane that is still
+    running something does not bounce — it is fed to that program as if the user
+    had typed it. A whole session launch went into a working agent's prompt box
+    that way, and the agent answered it: the launch was lost and the session the
+    user was working in was polluted, with nothing reported.
+
+    Raised rather than returning quietly, too. The turn loop already catches a
+    failed rotation, reports it, and keeps running, so an exception is both
+    visible and survivable — whereas a silent refusal looks identical to a
+    rotation that worked.
+    """
 
 
 class NoTerminalEmulatorAvailableError(RuntimeError):
@@ -100,6 +122,12 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
         attach_terminal_emulator: Optional[Callable[[str], None]] = None,
         wait_for_input_to_settle: Optional[Callable[[float], None]] = None,
         input_settle_delay_seconds: float = DEFAULT_INPUT_SETTLE_DELAY_SECONDS,
+        shell_readiness_timeout_seconds: float = (
+            DEFAULT_SHELL_READINESS_TIMEOUT_SECONDS
+        ),
+        shell_readiness_poll_interval_seconds: float = (
+            DEFAULT_SHELL_READINESS_POLL_INTERVAL_SECONDS
+        ),
     ) -> None:
         self._tmux_command_runner = tmux_command_runner or SubprocessTmuxCommandRunner()
         self._pane_output_log_directory = pane_output_log_directory
@@ -108,7 +136,16 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
         )
         self._wait_for_input_to_settle = wait_for_input_to_settle or time.sleep
         self._input_settle_delay_seconds = input_settle_delay_seconds
+        self._shell_readiness_timeout_seconds = shell_readiness_timeout_seconds
+        self._shell_readiness_poll_interval_seconds = (
+            shell_readiness_poll_interval_seconds
+        )
         self._window_identifiers_already_attached: set[str] = set()
+        # The command a pane runs when it is idle — its shell. Learned by asking
+        # the window at the moment it is opened, rather than compared against a
+        # hardcoded list of shell names, because the user's shell is theirs to
+        # choose and a list would be a guess that fails silently.
+        self._idle_pane_command_by_window_identifier: dict[str, str] = {}
 
     def build_pane_output_log_path(self, window_identifier: str) -> str:
         return os.path.join(
@@ -119,10 +156,67 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
         if not self.is_shared_window_alive(window_identifier):
             raise LookupError(f"shared window {window_identifier!r} is not open")
 
+    def _read_pane_current_command(self, window_identifier: str) -> str:
+        """Return the name of the program currently running in the pane."""
+        return self._tmux_command_runner.run_tmux_command(
+            [
+                "display-message",
+                "-p",
+                "-t",
+                window_identifier,
+                "-F",
+                "#{pane_current_command}",
+            ]
+        ).stdout_text.strip()
+
+    def wait_until_shared_window_is_ready_for_a_command(
+        self, window_identifier: str
+    ) -> bool:
+        """Wait for the pane to hand itself back to its shell.
+
+        Found by driving the real system: interrupting a session and then typing
+        the next command lost the command entirely. Sending an interrupt only
+        tells tmux to deliver the keys — it says nothing about the session having
+        finished exiting, and anything typed while it tears down is echoed to a
+        terminal that no shell is reading. The whole 1180-character launch
+        vanished and the pane fell to a bare prompt.
+
+        Readiness is therefore observed rather than waited out with a guessed
+        delay, since teardown time depends on what the session was doing.
+
+        Reports rather than raises, so a caller can ask without committing to an
+        outcome. The one caller that types does raise on False — see
+        _type_shell_line_into_window for why proceeding is not an option.
+
+        In practice this returns almost immediately: a rotation only interrupts a
+        session that has already finished its turn, so the pane is a shell within
+        moments. A timeout here means something genuinely unexpected, which is
+        why it is worth failing loudly over.
+        """
+        idle_pane_command = self._idle_pane_command_by_window_identifier.get(
+            window_identifier
+        )
+        if idle_pane_command is None:
+            # Never learned, so there is nothing to compare against and nothing
+            # to wait for. Only reachable for a window this adapter did not open.
+            return True
+        deadline = time.monotonic() + self._shell_readiness_timeout_seconds
+        while True:
+            if self._read_pane_current_command(window_identifier) == idle_pane_command:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            self._wait_for_input_to_settle(
+                self._shell_readiness_poll_interval_seconds
+            )
+
     def _type_shell_line_into_window(
         self, window_identifier: str, shell_line: str
     ) -> None:
-        """Type a line, let it register, then submit it.
+        """Wait for a shell to be listening, then type a line and submit it.
+
+        The wait lives here rather than in each caller because every caller has
+        the same problem and only one of them would remember to solve it.
 
         Typing and submitting are deliberately separate calls. An interactive
         agent running in the pane reads its input through a full-screen editor
@@ -131,6 +225,12 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
         the text — leaving the line sitting unsubmitted in the input box. A
         real driven session is what exposed this; a shell alone never would.
         """
+        if not self.wait_until_shared_window_is_ready_for_a_command(window_identifier):
+            raise SharedWindowNeverBecameReadyError(
+                f"shared window {window_identifier!r} is still running "
+                f"{self._read_pane_current_command(window_identifier)!r} after "
+                f"{self._shell_readiness_timeout_seconds}s; nothing was typed"
+            )
         self._tmux_command_runner.run_tmux_command(
             ["send-keys", "-t", window_identifier, shell_line]
         )
@@ -160,6 +260,13 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
                 ]
             )
 
+        # Learned here, before anything has been run, which is the only moment
+        # the pane is guaranteed to be sitting in its shell and nothing else.
+        if window_identifier not in self._idle_pane_command_by_window_identifier:
+            self._idle_pane_command_by_window_identifier[window_identifier] = (
+                self._read_pane_current_command(window_identifier)
+            )
+
         if window_identifier not in self._window_identifiers_already_attached:
             self._attach_terminal_emulator(window_identifier)
             self._window_identifiers_already_attached.add(window_identifier)
@@ -186,11 +293,23 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
         if interrupt_repeat_count < 1:
             return
         # One command carrying every interrupt, so they arrive as a rapid
-        # burst. Spacing decides whether the session cancels at all: verified
-        # against a real session, two interrupts back to back end it, while
-        # interrupts two seconds apart merely clear the input box and leave it
-        # running — four in a row failed to end it. Separate commands would
+        # burst. Spacing decides whether they land as a pair at all: measured
+        # against a real session, two interrupts back to back are treated as a
+        # pair, while interrupts two seconds apart merely clear the input box —
+        # four spaced out failed to end the session. Separate commands would
         # leave that spacing to process-launch latency.
+        #
+        # What a pair actually achieves depends on what the session is doing,
+        # and an earlier version of this comment claimed more than was true.
+        # Measured, on CLI 2.1.220:
+        #   idle at its prompt  -> the pair exits the session
+        #   mid-turn            -> the pair cancels the turn and the session
+        #                          stays alive; a second pair then exits it
+        #
+        # This is only ever called on an idle session, so one pair is enough.
+        # See rotate_to_next_branch_session for why that is guaranteed. Do not
+        # conclude from the mid-turn measurement that this needs to escalate or
+        # retry — that conclusion cost a day once already.
         #
         # No Enter: an interrupt is a keypress, and a trailing Enter would
         # submit whatever line the interrupt left behind.
@@ -238,6 +357,9 @@ class TmuxUserInterfaceControlAdapter(UserInterfaceControlInterface):
 
     def close_shared_window(self, window_identifier: str) -> None:
         self._window_identifiers_already_attached.discard(window_identifier)
+        # Forgotten along with the window: a window opened again later is a new
+        # pane, and a remembered shell name from the old one would be a guess.
+        self._idle_pane_command_by_window_identifier.pop(window_identifier, None)
         # kill-session on an absent session exits non-zero; that is the
         # idempotent outcome the interface requires, so it is not an error.
         self._tmux_command_runner.run_tmux_command(

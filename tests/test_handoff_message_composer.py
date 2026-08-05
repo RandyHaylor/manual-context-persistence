@@ -69,6 +69,23 @@ def test_the_acknowledge_only_instruction_is_one_short_line() -> None:
     assert "\n" not in ACKNOWLEDGE_ONLY_INSTRUCTION_TEXT
 
 
+def test_the_instruction_names_the_word_and_says_to_stop() -> None:
+    """Found in a live run, so it is pinned on the content and not the constant.
+
+    "Acknowledge receipt only." was obeyed as an invitation to summarize: the
+    reply came back with bullets, a file path, a library version, a caveat and
+    "Standing by." All of it accumulates in the one place this design keeps
+    small, so the instruction now names the single word and says to stop.
+
+    Every other assertion in this file compares against the constant, which
+    means none of them would notice the wording going soft again.
+    """
+    lowercased = ACKNOWLEDGE_ONLY_INSTRUCTION_TEXT.lower()
+    assert "acknowledged" in lowercased
+    assert "only" in lowercased
+    assert "stop" in lowercased
+
+
 def test_agent_output_preceding_a_prompt_is_not_sent_to_the_base() -> None:
     """Spec 1 line 29: no full branch transcript.
 

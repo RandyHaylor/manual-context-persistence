@@ -16,10 +16,25 @@ example. There is exactly one fenced block in this text, and it is a real
 example rather than a skeleton with placeholders, because a placeholder is
 something an agent can copy verbatim and a filled example is not.
 
-Emission is triggered by having done work worth saving, not by finishing a turn.
-Every turn would fire on a question or an acknowledgement, which costs a full
-rotation to carry nothing; a turn nominated in advance points at whichever turn
-this text arrives in, where no work has happened yet.
+Emission is triggered by having done the minimal amount of research,
+detail-gathering, code changes, etc. worth saving, not by finishing a turn.
+Two failures sit either side of that line, and the wording exists to miss both.
+
+Trigger on finishing a turn and a question fires the block, which costs a full
+rotation to carry nothing. That is not hypothetical: a live run produced five
+consecutive sessions with zero tool calls between them, each one asking the user
+to choose between the same three options and each one emitting a block saying to
+wait for that choice. Nobody could answer, because answering requires the
+question to reach a session that is still there.
+
+Trigger on the work being *complete* and one session builds an entire project
+before handing anything over, which is the opposite of what this exists for.
+"Minimal amount worth saving" is deliberately a low bar.
+
+The two endings are mutually exclusive for the same reason the loop happened:
+only the block survives a turn, so a question asked beside one is asked by
+nobody. The text tells the session its prose will be lost, rather than
+explaining why, because explaining why would describe the machinery.
 
 Two builders, because the first session of a run is the only one nobody has
 spoken to yet. The contract is identical in both; the first one also states that
@@ -77,10 +92,18 @@ def build_branch_session_preamble_text(require_git_commit: bool = False) -> str:
     )
     return (
         "## Output format\n\n"
-        "Once you have done any amount of work worth saving, include one "
-        f"`{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}` block at the end of your "
-        "response. Skip it while a request is still a question, an "
-        "acknowledgement, or a discussion with nothing to record.\n\n"
+        "Every response ends in exactly one of two ways, and never both.\n\n"
+        "**A — you are not finished with this chunk of work.** You are still in "
+        "the middle of a small chunk of work, but want clarification from the "
+        "user, or a tool call, etc. Say what you need, and include no "
+        f"`{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}` block.\n\n"
+        "**B — having done the minimal amount of research, detail-gathering, "
+        "code changes, etc. worth saving, and waiting on nothing.** Include "
+        f"exactly one `{CONTEXT_TO_KEEP_FENCE_LANGUAGE_TAG}` block as the last "
+        "thing in your response, and ask nothing. If you answer questions or "
+        "communicate anything that is not in the return envelope, know that it "
+        "will not be seen and will be lost.\n\n"
+        "Never include a block and a question in the same response.\n\n"
         f"{commit_requirement_paragraph}"
         "Fields, all required, and no others:\n\n"
         f"- `{CONTEXT_TO_KEEP_VERSION_FIELD_NAME}` (integer): always "

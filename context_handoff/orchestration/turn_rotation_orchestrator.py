@@ -196,6 +196,28 @@ class TurnRotationOrchestrator:
 
         The window is never closed and never replaced; the user keeps the same
         window across every turn.
+
+        The session being interrupted here is always idle, and that is worth
+        stating because it is not obvious from this method alone. A rotation
+        happens only when a context-to-keep is pending; a context-to-keep is
+        written only by the Stop hook; and the Stop hook fires only when the
+        agent has finished replying. So by the time this runs, the branch is
+        sitting at its prompt with nothing in flight, which is the case where a
+        single pair of interrupts exits it.
+
+        Two consequences, both easy to get wrong:
+
+        - Nothing here needs to fight a session that is still working. If you
+          find yourself designing escalating interrupts or retry loops, check
+          first whether you have reproduced a situation the rotation path can
+          actually reach. Interrupting on any signal other than Stop — the
+          branch's transcript merely appearing on disk, for instance — creates a
+          busy session artificially, and that is a property of the test, not of
+          this code.
+        - The window's own state cannot substitute for the Stop signal. A pane
+          reports which program is running, not whether that program is busy;
+          an agent generating a reply and an agent waiting for input are the
+          same process. Only the Stop hook distinguishes them.
         """
         pending_package = (
             self._context_to_keep_store.read_pending_context_to_keep_package()

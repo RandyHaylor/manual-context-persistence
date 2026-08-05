@@ -37,6 +37,14 @@ class UserInterfaceControlInterface(ABC):
 
         ``command_line_argv`` is opaque; implementations must quote it safely
         for their own transport rather than interpreting its contents.
+
+        Implementations must not deliver the command until the window is
+        actually able to receive one. A window that has just been interrupted
+        may still be shutting the previous program down, and a command handed
+        over during that gap is silently lost rather than refused — which cost a
+        whole session launch before this was stated. Waiting must be on observed
+        readiness, not a fixed delay: how long a teardown takes depends on what
+        the program was doing.
         """
 
     @abstractmethod

@@ -17,7 +17,11 @@ from typing import Sequence
 from context_handoff.context_to_keep.context_to_keep_package import ContextToKeepPackage
 from context_handoff.user_prompt_log.user_prompt_log_store import UserPromptLogEntry
 
-ACKNOWLEDGE_ONLY_INSTRUCTION_TEXT = "Acknowledge receipt only."
+# Names the word and says to stop, because "acknowledge receipt only" did not
+# hold: in a live run the reply came back as a full deliverable summary —
+# bullets, file path, library version, a caveat, and "Standing by." Every word
+# of that lands in the accumulating context this design exists to keep small.
+ACKNOWLEDGE_ONLY_INSTRUCTION_TEXT = 'Reply with only the word "acknowledged" and stop.'
 
 
 def compose_handoff_message_for_base_session(
