@@ -33,6 +33,10 @@ Design notes: [1. claude-cli-context-handoff-poc.md](1.%20claude-cli-context-han
 and [2. manual-context-persistence.md](2.%20manual-context-persistence.md).
 Deferred observations are in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
 
+A plan for rebuilding the same pattern on the Pi harness against a local model —
+where the constraint is a hard context ceiling rather than token cost — is in
+[3. pi-harness-context-handoff-plan.md](3.%20pi-harness-context-handoff-plan.md).
+
 ## Cost
 
 This design trades money for a small base session, and the trade is not
